@@ -10,9 +10,9 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/outputs"
-	"github.com/signalfx/golib/datapoint"
-	"github.com/signalfx/golib/datapoint/dpsink"
-	"github.com/signalfx/golib/event"
+	"github.com/signalfx/golib/v3/datapoint"
+	"github.com/signalfx/golib/v3/datapoint/dpsink"
+	"github.com/signalfx/golib/v3/event"
 )
 
 type sink struct {

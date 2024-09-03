@@ -9,10 +9,10 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/plugins/outputs"
 	"github.com/influxdata/telegraf/plugins/outputs/signalfx/parse"
-	"github.com/signalfx/golib/datapoint"
-	"github.com/signalfx/golib/datapoint/dpsink"
-	"github.com/signalfx/golib/event"
-	"github.com/signalfx/golib/sfxclient"
+	"github.com/signalfx/golib/v3/datapoint"
+	"github.com/signalfx/golib/v3/datapoint/dpsink"
+	"github.com/signalfx/golib/v3/event"
+	"github.com/signalfx/golib/v3/sfxclient"
 )
 
 /*SignalFx plugin context*/
