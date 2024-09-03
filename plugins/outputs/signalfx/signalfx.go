@@ -1,241 +1,324 @@
-//go:generate ../../../tools/readme_config_includer/generator
 package signalfx
 
 import (
 	"context"
-	_ "embed"
-	"errors"
-	"fmt"
-	"strings"
+	"log"
 
+	"sync"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/plugins/outputs"
+	"github.com/influxdata/telegraf/plugins/outputs/signalfx/parse"
 	"github.com/signalfx/golib/v3/datapoint"
 	"github.com/signalfx/golib/v3/datapoint/dpsink"
 	"github.com/signalfx/golib/v3/event"
 	"github.com/signalfx/golib/v3/sfxclient"
-
-	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/config"
-	"github.com/influxdata/telegraf/plugins/outputs"
 )
 
-//go:embed sample.conf
-var sampleConfig string
-
-// init initializes the plugin context
-func init() {
-	outputs.Add("signalfx", func() telegraf.Output {
-		return NewSignalFx()
-	})
-}
-
-// SignalFx plugin context
+/*SignalFx plugin context*/
 type SignalFx struct {
-	AccessToken        config.Secret `toml:"access_token"`
-	SignalFxRealm      string        `toml:"signalfx_realm"`
-	IngestURL          string        `toml:"ingest_url"`
-	IncludedEventNames []string      `toml:"included_event_names"`
-
-	Log telegraf.Logger `toml:"-"`
-
-	includedEventSet map[string]bool
-	client           dpsink.Sink
-
-	ctx    context.Context
-	cancel context.CancelFunc
+	APIToken           string
+	BatchSize          int
+	ChannelSize        int
+	DatapointIngestURL string
+	EventIngestURL     string
+	Exclude            []string
+	Include            []string
+	exclude            map[string]bool
+	include            map[string]bool
+	ctx                context.Context
+	client             dpsink.Sink
+	dps                chan *datapoint.Datapoint
+	evts               chan *event.Event
+	done               chan struct{}
+	wg                 sync.WaitGroup
 }
 
-// GetMetricType returns the equivalent telegraf ValueType for a signalfx metric type
-func GetMetricType(mtype telegraf.ValueType) (metricType datapoint.MetricType) {
+var sampleConfig = `
+    ## SignalFx API Token
+    APIToken = "my-secret-key" # required.
+
+    ## BatchSize
+    BatchSize = 1000
+
+    ## Ingest URL
+    DatapointIngestURL = "https://ingest.signalfx.com/v2/datapoint"
+    EventIngestURL = "https://ingest.signalfx.com/v2/event"
+
+    ## Exclude metrics by metric name
+    Exclude = ["plugin.metric_name", ""]
+
+    ## Events or String typed metrics are omitted by default,
+    ## with the exception of host property events which are emitted by 
+    ## the SignalFx Metadata Plugin.  If you require a string typed metric
+    ## you must specify the metric name in the following list
+    Include = ["plugin.metric_name", ""]
+`
+
+// GetMetricType casts a telegraf ValueType to a signalfx metric type
+func GetMetricType(mtype telegraf.ValueType) (metricType datapoint.MetricType, metricTypeString string) {
 	switch mtype {
 	case telegraf.Counter:
+		metricTypeString = "counter"
 		metricType = datapoint.Counter
 	case telegraf.Gauge:
+		metricTypeString = "gauge"
 		metricType = datapoint.Gauge
 	case telegraf.Summary:
+		metricTypeString = "summary"
 		metricType = datapoint.Gauge
+		log.Println("D! Output [signalfx] GetMetricType() summary metrics will be sent as gauges")
 	case telegraf.Histogram:
+		metricTypeString = "histogram"
 		metricType = datapoint.Gauge
+		log.Println("D! Output [signalfx] GetMetricType() histogram metrics will be sent as gauges")
 	case telegraf.Untyped:
+		metricTypeString = "untyped"
 		metricType = datapoint.Gauge
+		log.Println("D! Output [signalfx] GetMetricType() untyped metrics will be sent as gauges")
 	default:
+		metricTypeString = "unrecognized"
 		metricType = datapoint.Gauge
+		log.Println("D! Output [signalfx] GetMetricType() unrecognized metric type defaulting to gauge")
 	}
-	return metricType
+	return
 }
 
 // NewSignalFx - returns a new context for the SignalFx output plugin
 func NewSignalFx() *SignalFx {
-	ctx, cancel := context.WithCancel(context.Background())
 	return &SignalFx{
-		IncludedEventNames: []string{""},
-		ctx:                ctx,
-		cancel:             cancel,
-		client:             sfxclient.NewHTTPSink(),
+		APIToken:           "",
+		BatchSize:          1000,
+		ChannelSize:        100000,
+		DatapointIngestURL: "https://ingest.signalfx.com/v2/datapoint",
+		EventIngestURL:     "https://ingest.signalfx.com/v2/event",
+		Exclude:            []string{""},
+		Include:            []string{""},
+		done:               make(chan struct{}),
 	}
 }
 
-func (*SignalFx) SampleConfig() string {
+/*Description returns a description for the plugin*/
+func (s *SignalFx) Description() string {
+	return "Send metrics to SignalFx"
+}
+
+/*SampleConfig returns the sample configuration for the plugin*/
+func (s *SignalFx) SampleConfig() string {
 	return sampleConfig
 }
 
-// Connect establishes a connection to SignalFx
+/*Connect establishes a connection to SignalFx*/
 func (s *SignalFx) Connect() error {
-	client := s.client.(*sfxclient.HTTPSink)
-
-	token, err := s.AccessToken.Get()
-	if err != nil {
-		return fmt.Errorf("getting token failed: %w", err)
-	}
-	client.AuthToken = token.String()
-	token.Destroy()
-
-	if s.IngestURL != "" {
-		client.DatapointEndpoint = datapointEndpointForIngestURL(s.IngestURL)
-		client.EventEndpoint = eventEndpointForIngestURL(s.IngestURL)
-	} else if s.SignalFxRealm != "" {
-		client.DatapointEndpoint = datapointEndpointForRealm(s.SignalFxRealm)
-		client.EventEndpoint = eventEndpointForRealm(s.SignalFxRealm)
-	} else {
-		return errors.New("signalfx_realm or ingest_url must be configured")
-	}
-
+	// Make a connection to the URL here
+	client := sfxclient.NewHTTPSink()
+	client.AuthToken = s.APIToken
+	client.DatapointEndpoint = s.DatapointIngestURL
+	client.EventEndpoint = s.EventIngestURL
+	s.client = client
+	s.ctx = context.Background()
+	s.dps = make(chan *datapoint.Datapoint, s.ChannelSize)
+	s.evts = make(chan *event.Event, s.ChannelSize)
+	s.wg.Add(2)
+	go func() {
+		s.emitDatapoints()
+		s.wg.Done()
+	}()
+	go func() {
+		s.emitEvents()
+		s.wg.Done()
+	}()
+	log.Printf("I! Output [signalfx] batch size is %d\n", s.BatchSize)
 	return nil
 }
 
-// Close closes any connections to SignalFx
+/*Close closes the connection to SignalFx*/
 func (s *SignalFx) Close() error {
-	s.cancel()
-	s.client.(*sfxclient.HTTPSink).Client.CloseIdleConnections()
+	close(s.done)  // drain the input channels
+	s.wg.Wait()    // wait for the input channels to be drained
+	s.client = nil // destroy the client
 	return nil
 }
 
-func (s *SignalFx) ConvertToSignalFx(metrics []telegraf.Metric) ([]*datapoint.Datapoint, []*event.Event) {
-	var dps []*datapoint.Datapoint
-	var events []*event.Event
+func (s *SignalFx) emitDatapoints() {
+	var buf []*datapoint.Datapoint
+	for {
+		select {
+		case <-s.done:
+			return
+		case dp := <-s.dps:
+			buf = append(buf, dp)
+			s.fillAndSendDatapoints(buf)
+			buf = buf[:0]
+		}
+	}
+}
 
+func (s *SignalFx) fillAndSendDatapoints(buf []*datapoint.Datapoint) {
+outer:
+	for {
+		select {
+		case dp := <-s.dps:
+			buf = append(buf, dp)
+			if len(buf) >= s.BatchSize {
+				if err := s.client.AddDatapoints(s.ctx, buf); err != nil {
+					log.Println("E! Output [signalfx] ", err)
+				}
+				buf = buf[:0]
+			}
+		default:
+			break outer
+		}
+	}
+	if len(buf) > 0 {
+		if err := s.client.AddDatapoints(s.ctx, buf); err != nil {
+			log.Println("E! Output [signalfx] ", err)
+		}
+	}
+}
+
+func (s *SignalFx) emitEvents() {
+	var buf []*event.Event
+	for {
+		select {
+		case <-s.done:
+			return
+		case e := <-s.evts:
+			buf = append(buf, e)
+			s.fillAndSendEvents(buf)
+			buf = buf[:0]
+		}
+	}
+}
+
+func (s *SignalFx) fillAndSendEvents(buf []*event.Event) {
+outer:
+	for {
+		select {
+		case e := <-s.evts:
+			buf = append(buf, e)
+			if len(buf) >= s.BatchSize {
+				if err := s.client.AddEvents(s.ctx, buf); err != nil {
+					log.Println("E! Output [signalfx] ", err)
+				}
+				buf = buf[:0]
+			}
+		default:
+			break outer
+		}
+	}
+	if len(buf) > 0 {
+		if err := s.client.AddEvents(s.ctx, buf); err != nil {
+			log.Println("E! Output [signalfx] ", err)
+		}
+	}
+}
+
+// GetObjects - converts telegraf metrics to signalfx datapoints and events, and pushes them on to the supplied channels
+func (s *SignalFx) GetObjects(metrics []telegraf.Metric, dps chan *datapoint.Datapoint, evts chan *event.Event) {
 	for _, metric := range metrics {
-		s.Log.Debugf("Processing the following measurement: %v", metric)
+		log.Println("D! Outputs [signalfx] processing the following measurement: ", metric)
 		var timestamp = metric.Time()
+		var metricType datapoint.MetricType
+		var metricTypeString string
 
-		metricType := GetMetricType(metric.Type())
+		metricType, metricTypeString = GetMetricType(metric.Type())
+
 		for field, val := range metric.Fields() {
 			// Copy the metric tags because they are meant to be treated as
 			// immutable
 			var metricDims = metric.Tags()
 
 			// Generate the metric name
-			metricName := getMetricName(metric.Name(), field)
+			var metricName, isSFX = parse.GetMetricName(metric.Name(), field, metricDims)
+
+			// Check if the metric is explicitly excluded
+			if s.isExcluded(metricName) {
+				log.Println("D! Outputs [signalfx] excluding the following metric: ", metricName, metric)
+				continue
+			}
+
+			// If eligible, move the dimension "property" to properties
+			metricProps, propErr := parse.ExtractProperty(metricName, metricDims)
+			if propErr != nil {
+				log.Printf("E! Output [signalfx] %v", propErr)
+				continue
+			}
+
+			// Add common dimensions
+			metricDims["agent"] = "telegraf"
+			metricDims["telegraf_type"] = metricTypeString
+			parse.SetPluginDimension(metric.Name(), metricDims)
+			parse.RemoveSFXDimensions(metricDims)
 
 			// Get the metric value as a datapoint value
-			if metricValue, err := datapoint.CastMetricValueWithBool(val); err == nil {
+			if metricValue, err := datapoint.CastMetricValue(val); err == nil {
 				var dp = datapoint.New(metricName,
 					metricDims,
-					metricValue,
+					metricValue.(datapoint.Value),
 					metricType,
 					timestamp)
 
-				s.Log.Debugf("Datapoint: %v", dp.String())
+				// log metric
+				log.Println("D! Output [signalfx] ", dp.String())
 
-				dps = append(dps, dp)
+				// Add metric as a datapoint
+				dps <- dp
 			} else {
-				// Skip if it's not an explicitly included event
-				if !s.isEventIncluded(metricName) {
+				// Skip if it's not an sfx event and it's not included
+				if !isSFX && !s.isIncluded(metricName) {
 					continue
 				}
 
 				// We've already type checked field, so set property with value
-				metricProps := map[string]interface{}{"message": val}
+				metricProps["message"] = val
 				var ev = event.NewWithProperties(metricName,
 					event.AGENT,
 					metricDims,
 					metricProps,
 					timestamp)
 
-				s.Log.Debugf("Event: %v", ev.String())
+				// log event
+				log.Println("D! Output [signalfx] ", ev.String())
 
-				events = append(events, ev)
+				// Add event
+				evts <- ev
 			}
 		}
 	}
-
-	return dps, events
 }
 
-// Write call back for writing metrics
+/*Write call back for writing metrics*/
 func (s *SignalFx) Write(metrics []telegraf.Metric) error {
-	dps, events := s.ConvertToSignalFx(metrics)
-
-	if len(dps) > 0 {
-		err := s.client.AddDatapoints(s.ctx, dps)
-		if err != nil {
-			return err
-		}
-	}
-
-	if len(events) > 0 {
-		if err := s.client.AddEvents(s.ctx, events); err != nil {
-			// If events error out but we successfully sent some datapoints,
-			// don't return an error so that it won't ever retry -- that way we
-			// don't send the same datapoints twice.
-			if len(dps) == 0 {
-				return err
-			}
-			s.Log.Errorf("Failed to send SignalFx event: %v", err)
-		}
-	}
-
+	s.GetObjects(metrics, s.dps, s.evts)
 	return nil
 }
 
-// isEventIncluded - checks whether a metric name for an event was put on the whitelist
-func (s *SignalFx) isEventIncluded(name string) bool {
-	if s.includedEventSet == nil {
-		s.includedEventSet = make(map[string]bool, len(s.includedEventSet))
-		for _, include := range s.IncludedEventNames {
-			s.includedEventSet[include] = true
+// isExcluded - checks whether a metric name was put on the exclude list
+func (s *SignalFx) isExcluded(name string) bool {
+	if s.exclude == nil {
+		s.exclude = make(map[string]bool, len(s.Exclude))
+		for _, exclude := range s.Exclude {
+			s.exclude[exclude] = true
 		}
 	}
-	return s.includedEventSet[name]
+	return s.exclude[name]
 }
 
-// getMetricName combines telegraf fields and tags into a full metric name
-func getMetricName(metric string, field string) string {
-	name := metric
-
-	// Include field in metric name when it adds to the metric name
-	if field != "value" {
-		name = fmt.Sprintf("%s.%s", name, field)
+// isIncluded - checks whether a metric name was put on the include list
+func (s *SignalFx) isIncluded(name string) bool {
+	if s.include == nil {
+		s.include = make(map[string]bool, len(s.Include))
+		for _, include := range s.Include {
+			s.include[include] = true
+		}
 	}
-
-	return name
+	return s.include[name]
 }
 
-// ingestURLForRealm returns the base ingest URL for a particular SignalFx
-// realm
-func ingestURLForRealm(realm string) string {
-	return fmt.Sprintf("https://ingest.%s.signalfx.com", realm)
-}
-
-// datapointEndpointForRealm returns the endpoint to which datapoints should be
-// POSTed for a particular realm.
-func datapointEndpointForRealm(realm string) string {
-	return datapointEndpointForIngestURL(ingestURLForRealm(realm))
-}
-
-// datapointEndpointForRealm returns the endpoint to which datapoints should be
-// POSTed for a particular ingest base URL.
-func datapointEndpointForIngestURL(ingestURL string) string {
-	return strings.TrimRight(ingestURL, "/") + "/v2/datapoint"
-}
-
-// eventEndpointForRealm returns the endpoint to which events should be
-// POSTed for a particular realm.
-func eventEndpointForRealm(realm string) string {
-	return eventEndpointForIngestURL(ingestURLForRealm(realm))
-}
-
-// eventEndpointForRealm returns the endpoint to which events should be
-// POSTed for a particular ingest base URL.
-func eventEndpointForIngestURL(ingestURL string) string {
-	return strings.TrimRight(ingestURL, "/") + "/v2/event"
+/*init initializes the plugin context*/
+func init() {
+	outputs.Add("signalfx", func() telegraf.Output {
+		return NewSignalFx()
+	})
 }

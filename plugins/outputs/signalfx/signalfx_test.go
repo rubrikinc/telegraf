@@ -7,14 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/signalfx/golib/v3/datapoint"
-	"github.com/signalfx/golib/v3/event"
-	"github.com/stretchr/testify/require"
-
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/outputs"
-	"github.com/influxdata/telegraf/testutil"
+	"github.com/signalfx/golib/v3/datapoint"
+	"github.com/signalfx/golib/v3/datapoint/dpsink"
+	"github.com/signalfx/golib/v3/event"
+	"github.com/stretchr/testify/require"
 )
 
 type sink struct {
@@ -22,11 +21,11 @@ type sink struct {
 	evs []*event.Event
 }
 
-func (s *sink) AddDatapoints(_ context.Context, points []*datapoint.Datapoint) error {
+func (s *sink) AddDatapoints(ctx context.Context, points []*datapoint.Datapoint) error {
 	s.dps = append(s.dps, points...)
 	return nil
 }
-func (s *sink) AddEvents(_ context.Context, events []*event.Event) error {
+func (s *sink) AddEvents(ctx context.Context, events []*event.Event) error {
 	s.evs = append(s.evs, events...)
 	return nil
 }
@@ -36,10 +35,10 @@ type errorsink struct {
 	evs []*event.Event
 }
 
-func (e *errorsink) AddDatapoints(_ context.Context, _ []*datapoint.Datapoint) error {
+func (e *errorsink) AddDatapoints(ctx context.Context, points []*datapoint.Datapoint) error {
 	return errors.New("not sending datapoints")
 }
-func (e *errorsink) AddEvents(_ context.Context, _ []*event.Event) error {
+func (e *errorsink) AddEvents(ctx context.Context, events []*event.Event) error {
 	return errors.New("not sending events")
 }
 func TestSignalFx_SignalFx(t *testing.T) {
@@ -51,7 +50,8 @@ func TestSignalFx_SignalFx(t *testing.T) {
 		tp     telegraf.ValueType
 	}
 	type fields struct {
-		IncludedEvents []string
+		Exclude []string
+		Include []string
 	}
 	type want struct {
 		datapoints []*datapoint.Datapoint
@@ -108,25 +108,16 @@ func TestSignalFx_SignalFx(t *testing.T) {
 					fields: map[string]interface{}{"mymeasurement": float64(3.14)},
 					time:   time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC),
 				},
-				{
-					name:   "datapoint",
-					tags:   map[string]string{"host": "192.168.0.1"},
-					fields: map[string]interface{}{"myboolmeasurement": true},
-					time:   time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC),
-				},
-				{
-					name:   "datapoint",
-					tags:   map[string]string{"host": "192.168.0.1"},
-					fields: map[string]interface{}{"myboolmeasurement": false},
-					time:   time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC),
-				},
 			},
 			want: want{
 				datapoints: []*datapoint.Datapoint{
 					datapoint.New(
 						"datapoint.mymeasurement",
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "counter",
+							"host":          "192.168.0.1",
 						},
 						datapoint.NewFloatValue(float64(3.14)),
 						datapoint.Counter,
@@ -134,7 +125,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 					datapoint.New(
 						"datapoint.mymeasurement",
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
 						},
 						datapoint.NewFloatValue(float64(3.14)),
 						datapoint.Gauge,
@@ -142,7 +136,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 					datapoint.New(
 						"datapoint.mymeasurement",
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "summary",
+							"host":          "192.168.0.1",
 						},
 						datapoint.NewFloatValue(float64(3.14)),
 						datapoint.Gauge,
@@ -150,7 +147,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 					datapoint.New(
 						"datapoint.mymeasurement",
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "histogram",
+							"host":          "192.168.0.1",
 						},
 						datapoint.NewFloatValue(float64(3.14)),
 						datapoint.Gauge,
@@ -158,7 +158,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 					datapoint.New(
 						"datapoint.mymeasurement",
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "untyped",
+							"host":          "192.168.0.1",
 						},
 						datapoint.NewFloatValue(float64(3.14)),
 						datapoint.Gauge,
@@ -166,25 +169,12 @@ func TestSignalFx_SignalFx(t *testing.T) {
 					datapoint.New(
 						"datapoint.mymeasurement",
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "unrecognized",
+							"host":          "192.168.0.1",
 						},
 						datapoint.NewFloatValue(float64(3.14)),
-						datapoint.Gauge,
-						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
-					datapoint.New(
-						"datapoint.myboolmeasurement",
-						map[string]string{
-							"host": "192.168.0.1",
-						},
-						datapoint.NewIntValue(int64(1)),
-						datapoint.Gauge,
-						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
-					datapoint.New(
-						"datapoint.myboolmeasurement",
-						map[string]string{
-							"host": "192.168.0.1",
-						},
-						datapoint.NewIntValue(int64(0)),
 						datapoint.Gauge,
 						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
 				},
@@ -194,7 +184,7 @@ func TestSignalFx_SignalFx(t *testing.T) {
 		{
 			name: "add events of all types",
 			fields: fields{
-				IncludedEvents: []string{"event.mymeasurement"},
+				Include: []string{"event.mymeasurement"},
 			},
 			measurements: []*measurement{
 				{
@@ -246,7 +236,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 						"event.mymeasurement",
 						event.AGENT,
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "counter",
+							"host":          "192.168.0.1",
 						},
 						map[string]interface{}{
 							"message": "hello world",
@@ -256,7 +249,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 						"event.mymeasurement",
 						event.AGENT,
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
 						},
 						map[string]interface{}{
 							"message": "hello world",
@@ -266,7 +262,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 						"event.mymeasurement",
 						event.AGENT,
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "summary",
+							"host":          "192.168.0.1",
 						},
 						map[string]interface{}{
 							"message": "hello world",
@@ -276,7 +275,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 						"event.mymeasurement",
 						event.AGENT,
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "histogram",
+							"host":          "192.168.0.1",
 						},
 						map[string]interface{}{
 							"message": "hello world",
@@ -286,7 +288,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 						"event.mymeasurement",
 						event.AGENT,
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "untyped",
+							"host":          "192.168.0.1",
 						},
 						map[string]interface{}{
 							"message": "hello world",
@@ -296,7 +301,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 						"event.mymeasurement",
 						event.AGENT,
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "unrecognized",
+							"host":          "192.168.0.1",
 						},
 						map[string]interface{}{
 							"message": "hello world",
@@ -306,9 +314,18 @@ func TestSignalFx_SignalFx(t *testing.T) {
 			},
 		},
 		{
-			name:   "exclude events by default",
-			fields: fields{},
+			name: "exclude datapoints and events",
+			fields: fields{
+				Exclude: []string{"datapoint"},
+			},
 			measurements: []*measurement{
+				{
+					name:   "datapoint",
+					tags:   map[string]string{"host": "192.168.0.1"},
+					fields: map[string]interface{}{"value": float64(3.14)},
+					time:   time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC),
+					tp:     telegraf.Gauge,
+				},
 				{
 					name:   "event",
 					tags:   map[string]string{"host": "192.168.0.1"},
@@ -339,7 +356,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 					datapoint.New(
 						"datapoint",
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
 						},
 						datapoint.NewFloatValue(float64(3.14)),
 						datapoint.Gauge,
@@ -351,7 +371,7 @@ func TestSignalFx_SignalFx(t *testing.T) {
 		{
 			name: "add event",
 			fields: fields{
-				IncludedEvents: []string{"event.mymeasurement"},
+				Include: []string{"event.mymeasurement"},
 			},
 			measurements: []*measurement{
 				{
@@ -369,7 +389,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 						"event.mymeasurement",
 						event.AGENT,
 						map[string]string{
-							"host": "192.168.0.1",
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "untyped",
+							"host":          "192.168.0.1",
 						},
 						map[string]interface{}{
 							"message": "hello world",
@@ -416,11 +439,10 @@ func TestSignalFx_SignalFx(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := outputs.Outputs["signalfx"]().(*SignalFx)
-			s.IncludedEventNames = tt.fields.IncludedEvents
-			s.SignalFxRealm = "test"
-			s.Log = testutil.Logger{}
+			s.Exclude = tt.fields.Exclude
+			s.Include = tt.fields.Include
 
-			require.NoError(t, s.Connect())
+			s.Connect()
 
 			s.client = &sink{
 				dps: []*datapoint.Datapoint{},
@@ -433,20 +455,22 @@ func TestSignalFx_SignalFx(t *testing.T) {
 				m := metric.New(
 					measurement.name, measurement.tags, measurement.fields, measurement.time, measurement.tp,
 				)
-
 				measurements = append(measurements, m)
 			}
-
 			err := s.Write(measurements)
-			require.NoError(t, err)
-			require.Eventually(t, func() bool { return len(s.client.(*sink).dps) == len(tt.want.datapoints) }, 5*time.Second, 10*time.Millisecond)
-			require.Eventually(t, func() bool { return len(s.client.(*sink).evs) == len(tt.want.events) }, 5*time.Second, 10*time.Millisecond)
-
+			for !(len(s.client.(*sink).dps) == len(tt.want.datapoints) && len(s.client.(*sink).evs) == len(tt.want.events)) {
+				time.Sleep(1 * time.Second)
+			}
 			if !reflect.DeepEqual(s.client.(*sink).dps, tt.want.datapoints) {
 				t.Errorf("Collected datapoints do not match desired.  Collected: %v Desired: %v", s.client.(*sink).dps, tt.want.datapoints)
 			}
 			if !reflect.DeepEqual(s.client.(*sink).evs, tt.want.events) {
 				t.Errorf("Collected events do not match desired.  Collected: %v Desired: %v", s.client.(*sink).evs, tt.want.events)
+			}
+
+			_err := s.Close()
+			if _err != nil {
+				t.Errorf("Failed to close the plugin %v", err)
 			}
 		})
 	}
@@ -461,7 +485,8 @@ func TestSignalFx_Errors(t *testing.T) {
 		tp     telegraf.ValueType
 	}
 	type fields struct {
-		IncludedEvents []string
+		Exclude []string
+		Include []string
 	}
 	type want struct {
 		datapoints []*datapoint.Datapoint
@@ -527,7 +552,7 @@ func TestSignalFx_Errors(t *testing.T) {
 		{
 			name: "add events of all types",
 			fields: fields{
-				IncludedEvents: []string{"event.mymeasurement"},
+				Include: []string{"event.mymeasurement"},
 			},
 			measurements: []*measurement{
 				{
@@ -582,11 +607,11 @@ func TestSignalFx_Errors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := outputs.Outputs["signalfx"]().(*SignalFx)
 			// constrain the buffer to cover code that emits when batch size is met
-			s.IncludedEventNames = tt.fields.IncludedEvents
-			s.SignalFxRealm = "test"
-			s.Log = testutil.Logger{}
+			s.BatchSize = 2
+			s.Exclude = tt.fields.Exclude
+			s.Include = tt.fields.Include
 
-			require.NoError(t, s.Connect())
+			s.Connect()
 
 			s.client = &errorsink{
 				dps: []*datapoint.Datapoint{},
@@ -597,7 +622,6 @@ func TestSignalFx_Errors(t *testing.T) {
 				m := metric.New(
 					measurement.name, measurement.tags, measurement.fields, measurement.time, measurement.tp,
 				)
-
 				err := s.Write([]telegraf.Metric{m})
 				require.Error(t, err)
 			}
@@ -610,50 +634,676 @@ func TestSignalFx_Errors(t *testing.T) {
 			if !reflect.DeepEqual(s.client.(*errorsink).evs, tt.want.events) {
 				t.Errorf("Collected events do not match desired.  Collected: %v Desired: %v", s.client.(*errorsink).evs, tt.want.events)
 			}
+
+			err := s.Close()
+			if err != nil {
+				t.Errorf("Failed to close the plugin %v", err)
+			}
 		})
 	}
 }
 
-func TestGetMetricName(t *testing.T) {
+func TestSignalFx_fillAndSendDatapoints(t *testing.T) {
+	type fields struct {
+		APIToken    string
+		BatchSize   int
+		ChannelSize int
+		client      dpsink.Sink
+		dps         chan *datapoint.Datapoint
+		evts        chan *event.Event
+	}
 	type args struct {
-		metric string
-		field  string
-		dims   map[string]string
+		in  []*datapoint.Datapoint
+		buf []*datapoint.Datapoint
 	}
 	tests := []struct {
-		name    string
-		args    args
-		want    string
-		wantsfx bool
+		name   string
+		fields fields
+		args   args
+		want   []*datapoint.Datapoint
 	}{
 		{
-			name: "fields that equal value should not be append to metricname",
-			args: args{
-				metric: "datapoint",
-				field:  "value",
-				dims: map[string]string{
-					"testDimKey": "testDimVal",
+			name: "test buffer fills until batch size is met",
+			fields: fields{
+				BatchSize: 3,
+				dps:       make(chan *datapoint.Datapoint, 10),
+				client: &sink{
+					dps: []*datapoint.Datapoint{},
 				},
 			},
-			want: "datapoint",
+			args: args{
+				buf: []*datapoint.Datapoint{},
+				in: []*datapoint.Datapoint{
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "counter",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Counter,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Gauge,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "summary",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Gauge,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				},
+			},
+			want: []*datapoint.Datapoint{
+				datapoint.New(
+					"datapoint.mymeasurement",
+					map[string]string{
+						"plugin":        "datapoint",
+						"agent":         "telegraf",
+						"telegraf_type": "counter",
+						"host":          "192.168.0.1",
+					},
+					datapoint.NewFloatValue(float64(3.14)),
+					datapoint.Counter,
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				datapoint.New(
+					"datapoint.mymeasurement",
+					map[string]string{
+						"plugin":        "datapoint",
+						"agent":         "telegraf",
+						"telegraf_type": "gauge",
+						"host":          "192.168.0.1",
+					},
+					datapoint.NewFloatValue(float64(3.14)),
+					datapoint.Gauge,
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				datapoint.New(
+					"datapoint.mymeasurement",
+					map[string]string{
+						"plugin":        "datapoint",
+						"agent":         "telegraf",
+						"telegraf_type": "summary",
+						"host":          "192.168.0.1",
+					},
+					datapoint.NewFloatValue(float64(3.14)),
+					datapoint.Gauge,
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+			},
 		},
 		{
-			name: "fields other than 'value' with out sf_metric dim should return measurement.fieldname as metric name",
-			args: args{
-				metric: "datapoint",
-				field:  "test",
-				dims: map[string]string{
-					"testDimKey": "testDimVal",
+			name: "test buffer fills until batch size is and has 1 remaining when it breaks",
+			fields: fields{
+				BatchSize: 2,
+				dps:       make(chan *datapoint.Datapoint, 10),
+				client: &sink{
+					dps: []*datapoint.Datapoint{},
 				},
 			},
-			want: "datapoint.test",
+			args: args{
+				buf: []*datapoint.Datapoint{},
+				in: []*datapoint.Datapoint{
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "counter",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Counter,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Gauge,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "summary",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Gauge,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				},
+			},
+			want: []*datapoint.Datapoint{
+				datapoint.New(
+					"datapoint.mymeasurement",
+					map[string]string{
+						"plugin":        "datapoint",
+						"agent":         "telegraf",
+						"telegraf_type": "counter",
+						"host":          "192.168.0.1",
+					},
+					datapoint.NewFloatValue(float64(3.14)),
+					datapoint.Counter,
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				datapoint.New(
+					"datapoint.mymeasurement",
+					map[string]string{
+						"plugin":        "datapoint",
+						"agent":         "telegraf",
+						"telegraf_type": "gauge",
+						"host":          "192.168.0.1",
+					},
+					datapoint.NewFloatValue(float64(3.14)),
+					datapoint.Gauge,
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				datapoint.New(
+					"datapoint.mymeasurement",
+					map[string]string{
+						"plugin":        "datapoint",
+						"agent":         "telegraf",
+						"telegraf_type": "summary",
+						"host":          "192.168.0.1",
+					},
+					datapoint.NewFloatValue(float64(3.14)),
+					datapoint.Gauge,
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getMetricName(tt.args.metric, tt.args.field)
-			if got != tt.want {
-				t.Errorf("getMetricName() got = %v, want %v", got, tt.want)
+			s := &SignalFx{
+				APIToken:    tt.fields.APIToken,
+				BatchSize:   tt.fields.BatchSize,
+				ChannelSize: tt.fields.ChannelSize,
+				client:      tt.fields.client,
+				dps:         tt.fields.dps,
+				evts:        tt.fields.evts,
+			}
+			for _, e := range tt.args.in {
+				s.dps <- e
+			}
+			s.fillAndSendDatapoints(tt.args.buf)
+			if !reflect.DeepEqual(s.client.(*sink).dps, tt.want) {
+				t.Errorf("fillAndSendDatapoints() datapoints do not match desired.  Collected: %v Desired: %v", s.client.(*sink).dps, tt.want)
+			}
+		})
+	}
+}
+
+func TestSignalFx_fillAndSendDatapointsWithError(t *testing.T) {
+	type fields struct {
+		APIToken    string
+		BatchSize   int
+		ChannelSize int
+		client      dpsink.Sink
+		dps         chan *datapoint.Datapoint
+		evts        chan *event.Event
+	}
+	type args struct {
+		in  []*datapoint.Datapoint
+		buf []*datapoint.Datapoint
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   []*datapoint.Datapoint
+	}{
+		{
+			name: "test buffer fills until batch size is met",
+			fields: fields{
+				BatchSize: 3,
+				dps:       make(chan *datapoint.Datapoint, 10),
+				client: &errorsink{
+					dps: []*datapoint.Datapoint{},
+				},
+			},
+			args: args{
+				buf: []*datapoint.Datapoint{},
+				in: []*datapoint.Datapoint{
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "counter",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Counter,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Gauge,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					datapoint.New(
+						"datapoint.mymeasurement",
+						map[string]string{
+							"plugin":        "datapoint",
+							"agent":         "telegraf",
+							"telegraf_type": "summary",
+							"host":          "192.168.0.1",
+						},
+						datapoint.NewFloatValue(float64(3.14)),
+						datapoint.Gauge,
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				},
+			},
+			want: []*datapoint.Datapoint{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SignalFx{
+				APIToken:    tt.fields.APIToken,
+				BatchSize:   tt.fields.BatchSize,
+				ChannelSize: tt.fields.ChannelSize,
+				client:      tt.fields.client,
+				dps:         tt.fields.dps,
+				evts:        tt.fields.evts,
+			}
+			for _, e := range tt.args.in {
+				s.dps <- e
+			}
+			s.fillAndSendDatapoints(tt.args.buf)
+			if !reflect.DeepEqual(s.client.(*errorsink).dps, tt.want) {
+				t.Errorf("fillAndSendDatapoints() datapoints do not match desired.  Collected: %v Desired: %v", s.client.(*errorsink).dps, tt.want)
+			}
+		})
+	}
+}
+
+func TestSignalFx_fillAndSendEvents(t *testing.T) {
+	type fields struct {
+		APIToken    string
+		BatchSize   int
+		ChannelSize int
+		client      dpsink.Sink
+		dps         chan *datapoint.Datapoint
+		evts        chan *event.Event
+	}
+	type args struct {
+		in  []*event.Event
+		buf []*event.Event
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   []*event.Event
+	}{
+		{
+			name: "test buffer fills until batch size is met",
+			fields: fields{
+				BatchSize: 3,
+				evts:      make(chan *event.Event, 10),
+				client: &sink{
+					evs: []*event.Event{},
+				},
+			},
+			args: args{
+				buf: []*event.Event{},
+				in: []*event.Event{
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "counter",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "summary",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				},
+			},
+			want: []*event.Event{
+				event.NewWithProperties(
+					"event.mymeasurement",
+					event.AGENT,
+					map[string]string{
+						"plugin":        "event",
+						"agent":         "telegraf",
+						"telegraf_type": "counter",
+						"host":          "192.168.0.1",
+					},
+					map[string]interface{}{
+						"message": "hello world",
+					},
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				event.NewWithProperties(
+					"event.mymeasurement",
+					event.AGENT,
+					map[string]string{
+						"plugin":        "event",
+						"agent":         "telegraf",
+						"telegraf_type": "gauge",
+						"host":          "192.168.0.1",
+					},
+					map[string]interface{}{
+						"message": "hello world",
+					},
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				event.NewWithProperties(
+					"event.mymeasurement",
+					event.AGENT,
+					map[string]string{
+						"plugin":        "event",
+						"agent":         "telegraf",
+						"telegraf_type": "summary",
+						"host":          "192.168.0.1",
+					},
+					map[string]interface{}{
+						"message": "hello world",
+					},
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+			},
+		},
+		{
+			name: "test buffer fills until batch size is and has 1 remaining when it breaks",
+			fields: fields{
+				BatchSize: 2,
+				evts:      make(chan *event.Event, 10),
+				client: &sink{
+					evs: []*event.Event{},
+				},
+			},
+			args: args{
+				buf: []*event.Event{},
+				in: []*event.Event{
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "counter",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "summary",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				},
+			},
+			want: []*event.Event{
+				event.NewWithProperties(
+					"event.mymeasurement",
+					event.AGENT,
+					map[string]string{
+						"plugin":        "event",
+						"agent":         "telegraf",
+						"telegraf_type": "counter",
+						"host":          "192.168.0.1",
+					},
+					map[string]interface{}{
+						"message": "hello world",
+					},
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				event.NewWithProperties(
+					"event.mymeasurement",
+					event.AGENT,
+					map[string]string{
+						"plugin":        "event",
+						"agent":         "telegraf",
+						"telegraf_type": "gauge",
+						"host":          "192.168.0.1",
+					},
+					map[string]interface{}{
+						"message": "hello world",
+					},
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				event.NewWithProperties(
+					"event.mymeasurement",
+					event.AGENT,
+					map[string]string{
+						"plugin":        "event",
+						"agent":         "telegraf",
+						"telegraf_type": "summary",
+						"host":          "192.168.0.1",
+					},
+					map[string]interface{}{
+						"message": "hello world",
+					},
+					time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SignalFx{
+				APIToken:    tt.fields.APIToken,
+				BatchSize:   tt.fields.BatchSize,
+				ChannelSize: tt.fields.ChannelSize,
+				client:      tt.fields.client,
+				dps:         tt.fields.dps,
+				evts:        tt.fields.evts,
+			}
+			for _, e := range tt.args.in {
+				s.evts <- e
+			}
+			s.fillAndSendEvents(tt.args.buf)
+			if !reflect.DeepEqual(s.client.(*sink).evs, tt.want) {
+				t.Errorf("fillAndSendEvents() datapoints do not match desired.  Collected: %v Desired: %v", s.client.(*sink).evs, tt.want)
+			}
+		})
+	}
+}
+
+func TestSignalFx_fillAndSendEventsWithErrors(t *testing.T) {
+	type fields struct {
+		APIToken    string
+		BatchSize   int
+		ChannelSize int
+		client      dpsink.Sink
+		dps         chan *datapoint.Datapoint
+		evts        chan *event.Event
+	}
+	type args struct {
+		in  []*event.Event
+		buf []*event.Event
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   []*event.Event
+	}{
+		{
+			name: "test buffer fills until batch size is met, but add events returns error",
+			fields: fields{
+				BatchSize: 3,
+				evts:      make(chan *event.Event, 10),
+				client: &errorsink{
+					evs: []*event.Event{},
+				},
+			},
+			args: args{
+				buf: []*event.Event{},
+				in: []*event.Event{
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "counter",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "gauge",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+					event.NewWithProperties(
+						"event.mymeasurement",
+						event.AGENT,
+						map[string]string{
+							"plugin":        "event",
+							"agent":         "telegraf",
+							"telegraf_type": "summary",
+							"host":          "192.168.0.1",
+						},
+						map[string]interface{}{
+							"message": "hello world",
+						},
+						time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				},
+			},
+			want: []*event.Event{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SignalFx{
+				APIToken:    tt.fields.APIToken,
+				BatchSize:   tt.fields.BatchSize,
+				ChannelSize: tt.fields.ChannelSize,
+				client:      tt.fields.client,
+				dps:         tt.fields.dps,
+				evts:        tt.fields.evts,
+			}
+			for _, e := range tt.args.in {
+				s.evts <- e
+			}
+			s.fillAndSendEvents(tt.args.buf)
+			if !reflect.DeepEqual(s.client.(*errorsink).evs, tt.want) {
+				t.Errorf("fillAndSendEvents() datapoints do not match desired.  Collected: %v Desired: %v", s.client.(*errorsink).evs, tt.want)
+			}
+		})
+	}
+}
+
+// this is really just for complete code coverage
+func TestSignalFx_Description(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{
+			name: "verify description is correct",
+			want: "Send metrics to SignalFx",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SignalFx{}
+			if got := s.Description(); got != tt.want {
+				t.Errorf("SignalFx.Description() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// this is also just for complete code coverage
+func TestSignalFx_SampleConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{
+			name: "verify sample config is returned",
+			want: sampleConfig,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SignalFx{}
+			if got := s.SampleConfig(); got != tt.want {
+				t.Errorf("SignalFx.SampleConfig() = %v, want %v", got, tt.want)
 			}
 		})
 	}
