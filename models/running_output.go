@@ -70,12 +70,7 @@ type RunningOutput struct {
 	aggMutex sync.Mutex
 }
 
-func NewRunningOutput(
-	output telegraf.Output,
-	config *OutputConfig,
-	batchSize int,
-	bufferLimit int,
-) *RunningOutput {
+func NewRunningOutput(output telegraf.Output, config *OutputConfig, batchSize, bufferLimit int) *RunningOutput {
 	tags := map[string]string{"output": config.Name}
 	if config.Alias != "" {
 		tags["alias"] = config.Alias
@@ -104,7 +99,7 @@ func NewRunningOutput(
 		batchSize = DefaultMetricBatchSize
 	}
 
-	b, err := NewBuffer(config.Name, config.Alias, bufferLimit, config.BufferStrategy, config.BufferDirectory)
+	b, err := NewBuffer(config.Name, config.ID, config.Alias, bufferLimit, config.BufferStrategy, config.BufferDirectory)
 	if err != nil {
 		panic(err)
 	}
@@ -204,11 +199,29 @@ func (r *RunningOutput) Close() {
 	if err := r.Output.Close(); err != nil {
 		r.log.Errorf("Error closing output: %v", err)
 	}
+
+	if err := r.buffer.Close(); err != nil {
+		r.log.Errorf("Error closing output buffer: %v", err)
+	}
 }
 
 // AddMetric adds a metric to the output.
-// Takes ownership of metric
+// The given metric will be copied if the output selects the metric.
 func (r *RunningOutput) AddMetric(metric telegraf.Metric) {
+	ok, err := r.Config.Filter.Select(metric)
+	if err != nil {
+		r.log.Errorf("filtering failed: %v", err)
+	} else if !ok {
+		r.MetricsFiltered.Incr(1)
+		return
+	}
+
+	r.add(metric.Copy())
+}
+
+// AddMetricNoCopy adds a metric to the output.
+// Takes ownership of metric regardless of whether the output selects it for outputting.
+func (r *RunningOutput) AddMetricNoCopy(metric telegraf.Metric) {
 	ok, err := r.Config.Filter.Select(metric)
 	if err != nil {
 		r.log.Errorf("filtering failed: %v", err)
@@ -217,6 +230,10 @@ func (r *RunningOutput) AddMetric(metric telegraf.Metric) {
 		return
 	}
 
+	r.add(metric)
+}
+
+func (r *RunningOutput) add(metric telegraf.Metric) {
 	r.Config.Filter.Modify(metric)
 	if len(metric.FieldList()) == 0 {
 		r.metricFiltered(metric)
@@ -284,22 +301,21 @@ func (r *RunningOutput) Write() error {
 
 	atomic.StoreInt64(&r.newMetricsCount, 0)
 
-	// Only process the metrics in the buffer now.  Metrics added while we are
+	// Only process the metrics in the buffer now. Metrics added while we are
 	// writing will be sent on the next call.
 	nBuffer := r.buffer.Len()
 	nBatches := nBuffer/r.MetricBatchSize + 1
 	for i := 0; i < nBatches; i++ {
-		batch := r.buffer.Batch(r.MetricBatchSize)
-		if len(batch) == 0 {
-			break
+		tx := r.buffer.BeginTransaction(r.MetricBatchSize)
+		if len(tx.Batch) == 0 {
+			return nil
 		}
-
-		err := r.writeMetrics(batch)
+		err := r.writeMetrics(tx.Batch)
+		r.updateTransaction(tx, err)
+		r.buffer.EndTransaction(tx)
 		if err != nil {
-			r.buffer.Reject(batch)
 			return err
 		}
-		r.buffer.Accept(batch)
 	}
 	return nil
 }
@@ -317,19 +333,15 @@ func (r *RunningOutput) WriteBatch() error {
 		r.log.Debugf("Successfully connected after %d attempts", r.retries)
 	}
 
-	batch := r.buffer.Batch(r.MetricBatchSize)
-	if len(batch) == 0 {
+	tx := r.buffer.BeginTransaction(r.MetricBatchSize)
+	if len(tx.Batch) == 0 {
 		return nil
 	}
+	err := r.writeMetrics(tx.Batch)
+	r.updateTransaction(tx, err)
+	r.buffer.EndTransaction(tx)
 
-	err := r.writeMetrics(batch)
-	if err != nil {
-		r.buffer.Reject(batch)
-		return err
-	}
-	r.buffer.Accept(batch)
-
-	return nil
+	return err
 }
 
 func (r *RunningOutput) writeMetrics(metrics []telegraf.Metric) error {
@@ -348,6 +360,26 @@ func (r *RunningOutput) writeMetrics(metrics []telegraf.Metric) error {
 		r.log.Debugf("Wrote batch of %d metrics in %s", len(metrics), elapsed)
 	}
 	return err
+}
+
+func (*RunningOutput) updateTransaction(tx *Transaction, err error) {
+	// No error indicates all metrics were written successfully
+	if err == nil {
+		tx.AcceptAll()
+		return
+	}
+
+	// A non-partial-write-error indicated none of the metrics were written
+	// successfully and we should keep them for the next write cycle
+	var writeErr *internal.PartialWriteError
+	if !errors.As(err, &writeErr) {
+		tx.KeepAll()
+		return
+	}
+
+	// Transfer the accepted and rejected indices based on the write error values
+	tx.Accept = writeErr.MetricsAccept
+	tx.Reject = writeErr.MetricsReject
 }
 
 func (r *RunningOutput) LogBufferStatus() {

@@ -149,7 +149,7 @@ func TestDLB_writeReadSocketMessage(t *testing.T) {
 			connection: mockConn,
 			Log:        testutil.Logger{},
 		}
-		mockConn.On("Write", []byte{}).Return(0, errors.New("write error")).Once().
+		mockConn.On("Write", make([]byte, 0)).Return(0, errors.New("write error")).Once().
 			On("Close").Return(nil).Once()
 
 		_, _, err := dlb.writeReadSocketMessage("")
@@ -180,7 +180,7 @@ func TestDLB_writeReadSocketMessage(t *testing.T) {
 			connection: mockConn,
 			Log:        testutil.Logger{},
 		}
-		mockConn.On("Write", []byte{}).Return(0, nil).Once().
+		mockConn.On("Write", make([]byte, 0)).Return(0, nil).Once().
 			On("Read", mock.Anything).Return(0, nil).
 			On("Close").Return(nil).Once()
 
@@ -935,7 +935,10 @@ func simulateResponse(mockConn *mocks.Conn, response string, readErr error) {
 
 func simulateSocketResponseForGather(socket net.Listener, t *testing.T) {
 	conn, err := socket.Accept()
-	require.NoError(t, err)
+	if err != nil {
+		t.Error(err)
+		return
+	}
 
 	type initMessage struct {
 		Version      string `json:"version"`
@@ -947,14 +950,21 @@ func simulateSocketResponseForGather(socket net.Listener, t *testing.T) {
 		Pid:          1,
 		MaxOutputLen: 1024,
 	})
-	require.NoError(t, err)
-	_, err = conn.Write(initMsg)
-	require.NoError(t, err)
+	if err != nil {
+		t.Error(err)
+		return
+	}
 
-	require.NoError(t, err)
+	if _, err = conn.Write(initMsg); err != nil {
+		t.Error(err)
+		return
+	}
+
 	eventdevListWithSecondIndex := []string{"/eventdev/port_list", "/eventdev/queue_list"}
-	_, err = fmt.Fprintf(conn, `{%q: [0, 1]}`, eventdevListWithSecondIndex[0])
-	require.NoError(t, err)
+	if _, err = fmt.Fprintf(conn, `{%q: [0, 1]}`, eventdevListWithSecondIndex[0]); err != nil {
+		t.Error(err)
+		return
+	}
 }
 
 func createSocketForTest(t *testing.T) (string, net.Listener) {

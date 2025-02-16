@@ -165,7 +165,7 @@ func (s *Serializer) createObject(metric telegraf.Metric) ([]byte, error) {
 	// The tags are common to all events in this timeseries
 	commonTags := CommonTags{}
 
-	commonTags.Fields = map[string]interface{}{}
+	commonTags.Fields = make(map[string]interface{}, len(metric.Tags()))
 
 	// Break tags out into key(n)=value(t) pairs
 	for n, t := range metric.Tags() {
@@ -210,17 +210,8 @@ func verifyValue(v interface{}) (value interface{}, valid bool) {
 
 func init() {
 	serializers.Add("splunkmetric",
-		func() serializers.Serializer {
+		func() telegraf.Serializer {
 			return &Serializer{}
 		},
 	)
-}
-
-// InitFromConfig is a compatibility function to construct the parser the old way
-func (s *Serializer) InitFromConfig(cfg *serializers.Config) error {
-	s.HecRouting = cfg.HecRouting
-	s.MultiMetric = cfg.SplunkmetricMultiMetric
-	s.OmitEventTag = cfg.SplunkmetricOmitEventTag
-
-	return nil
 }

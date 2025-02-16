@@ -188,7 +188,7 @@ func (tsb timeSeriesBuckets) Add(m telegraf.Metric, f []*telegraf.Field, ts *mon
 // Split metrics up by timestamp and send to Google Cloud Stackdriver
 func (s *Stackdriver) Write(metrics []telegraf.Metric) error {
 	metricBatch := make(map[int64][]telegraf.Metric)
-	timestamps := []int64{}
+	timestamps := make([]int64, 0, len(metrics))
 	for _, metric := range sorted(metrics) {
 		timestamp := metric.Time().UnixNano()
 		if existingSlice, ok := metricBatch[timestamp]; ok {
@@ -251,7 +251,7 @@ func (s *Stackdriver) sendBatch(batch []telegraf.Metric) error {
 		}
 
 		if m.Type() == telegraf.Histogram {
-			value, err := s.buildHistogram(m)
+			value, err := buildHistogram(m)
 			if err != nil {
 				s.Log.Errorf("Unable to build distribution from metric %s: %s", m, err)
 				continue
@@ -474,11 +474,7 @@ func getStackdriverIntervalEndpoints(
 	return startTime, endTime
 }
 
-func getStackdriverTimeInterval(
-	m metricpb.MetricDescriptor_MetricKind,
-	startTime *timestamppb.Timestamp,
-	endTime *timestamppb.Timestamp,
-) (*monitoringpb.TimeInterval, error) {
+func getStackdriverTimeInterval(m metricpb.MetricDescriptor_MetricKind, startTime, endTime *timestamppb.Timestamp) (*monitoringpb.TimeInterval, error) {
 	switch m {
 	case metricpb.MetricDescriptor_GAUGE:
 		return &monitoringpb.TimeInterval{
@@ -567,7 +563,7 @@ func (s *Stackdriver) getStackdriverTypedValue(value interface{}) (*monitoringpb
 	}
 }
 
-func (s *Stackdriver) buildHistogram(m telegraf.Metric) (*monitoringpb.TypedValue, error) {
+func buildHistogram(m telegraf.Metric) (*monitoringpb.TypedValue, error) {
 	sumInter, ok := m.GetField("sum")
 	if !ok {
 		return nil, errors.New("no sum field present")

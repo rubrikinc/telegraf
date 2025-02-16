@@ -196,6 +196,7 @@ func TestServeHTTP(t *testing.T) {
 			for m := range d {
 				ro.AddMetric(m)
 				ro.Write() //nolint:errcheck // test will fail anyway if the write fails
+				m.Accept()
 			}
 		}(dst)
 
@@ -218,7 +219,7 @@ func TestServeHTTP(t *testing.T) {
 
 type testMetricMaker struct{}
 
-func (tm *testMetricMaker) Name() string {
+func (*testMetricMaker) Name() string {
 	return "TestPlugin"
 }
 
@@ -226,11 +227,11 @@ func (tm *testMetricMaker) LogName() string {
 	return tm.Name()
 }
 
-func (tm *testMetricMaker) MakeMetric(metric telegraf.Metric) telegraf.Metric {
+func (*testMetricMaker) MakeMetric(metric telegraf.Metric) telegraf.Metric {
 	return metric
 }
 
-func (tm *testMetricMaker) Log() telegraf.Logger {
+func (*testMetricMaker) Log() telegraf.Logger {
 	return logger.New("test", "test", "")
 }
 

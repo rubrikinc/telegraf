@@ -100,6 +100,11 @@ func TestMultipleConfigs(t *testing.T) {
 	}
 }
 
+func TestParserEmptyConfig(t *testing.T) {
+	plugin := &json_v2.Parser{}
+	require.ErrorContains(t, plugin.Init(), "no configuration provided")
+}
+
 func BenchmarkParsingSequential(b *testing.B) {
 	inputFilename := filepath.Join("testdata", "benchmark", "input.json")
 

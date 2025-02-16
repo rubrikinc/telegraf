@@ -8,25 +8,25 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	cwClient "github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/filter"
-	internalaws "github.com/influxdata/telegraf/plugins/common/aws"
+	common_aws "github.com/influxdata/telegraf/plugins/common/aws"
 	"github.com/influxdata/telegraf/plugins/common/proxy"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 type mockGatherCloudWatchClient struct{}
 
-func (m *mockGatherCloudWatchClient) ListMetrics(
+func (*mockGatherCloudWatchClient) ListMetrics(
 	_ context.Context,
-	params *cwClient.ListMetricsInput,
-	_ ...func(*cwClient.Options),
-) (*cwClient.ListMetricsOutput, error) {
-	response := &cwClient.ListMetricsOutput{
+	params *cloudwatch.ListMetricsInput,
+	_ ...func(*cloudwatch.Options),
+) (*cloudwatch.ListMetricsOutput, error) {
+	response := &cloudwatch.ListMetricsOutput{
 		Metrics: []types.Metric{
 			{
 				Namespace:  params.Namespace,
@@ -56,12 +56,12 @@ func (m *mockGatherCloudWatchClient) ListMetrics(
 	return response, nil
 }
 
-func (m *mockGatherCloudWatchClient) GetMetricData(
+func (*mockGatherCloudWatchClient) GetMetricData(
 	_ context.Context,
-	params *cwClient.GetMetricDataInput,
-	_ ...func(*cwClient.Options),
-) (*cwClient.GetMetricDataOutput, error) {
-	return &cwClient.GetMetricDataOutput{
+	params *cloudwatch.GetMetricDataInput,
+	_ ...func(*cloudwatch.Options),
+) (*cloudwatch.GetMetricDataOutput, error) {
+	return &cloudwatch.GetMetricDataOutput{
 		MetricDataResults: []types.MetricDataResult{
 			{
 				Id:         aws.String("minimum_0_0"),
@@ -167,7 +167,7 @@ func TestGather(t *testing.T) {
 	require.NoError(t, err)
 	internalDuration := config.Duration(duration)
 	c := &CloudWatch{
-		CredentialConfig: internalaws.CredentialConfig{
+		CredentialConfig: common_aws.CredentialConfig{
 			Region: "us-east-1",
 		},
 		Namespace: "AWS/ELB",
@@ -204,7 +204,7 @@ func TestGatherDenseMetric(t *testing.T) {
 	require.NoError(t, err)
 	internalDuration := config.Duration(duration)
 	c := &CloudWatch{
-		CredentialConfig: internalaws.CredentialConfig{
+		CredentialConfig: common_aws.CredentialConfig{
 			Region: "us-east-1",
 		},
 		Namespace:    "AWS/ELB",
@@ -243,7 +243,7 @@ func TestMultiAccountGather(t *testing.T) {
 	require.NoError(t, err)
 	internalDuration := config.Duration(duration)
 	c := &CloudWatch{
-		CredentialConfig: internalaws.CredentialConfig{
+		CredentialConfig: common_aws.CredentialConfig{
 			Region: "us-east-1",
 		},
 		Namespace:             "AWS/ELB",
@@ -307,12 +307,12 @@ func TestGather_MultipleNamespaces(t *testing.T) {
 
 type mockSelectMetricsCloudWatchClient struct{}
 
-func (m *mockSelectMetricsCloudWatchClient) ListMetrics(
-	_ context.Context,
-	_ *cwClient.ListMetricsInput,
-	_ ...func(*cwClient.Options),
-) (*cwClient.ListMetricsOutput, error) {
-	metrics := []types.Metric{}
+func (*mockSelectMetricsCloudWatchClient) ListMetrics(
+	context.Context,
+	*cloudwatch.ListMetricsInput,
+	...func(*cloudwatch.Options),
+) (*cloudwatch.ListMetricsOutput, error) {
+	metrics := make([]types.Metric, 0)
 	// 4 metrics are available
 	metricNames := []string{"Latency", "RequestCount", "HealthyHostCount", "UnHealthyHostCount"}
 	// for 3 ELBs
@@ -352,17 +352,17 @@ func (m *mockSelectMetricsCloudWatchClient) ListMetrics(
 		}
 	}
 
-	result := &cwClient.ListMetricsOutput{
+	result := &cloudwatch.ListMetricsOutput{
 		Metrics: metrics,
 	}
 	return result, nil
 }
 
-func (m *mockSelectMetricsCloudWatchClient) GetMetricData(
-	_ context.Context,
-	_ *cwClient.GetMetricDataInput,
-	_ ...func(*cwClient.Options),
-) (*cwClient.GetMetricDataOutput, error) {
+func (*mockSelectMetricsCloudWatchClient) GetMetricData(
+	context.Context,
+	*cloudwatch.GetMetricDataInput,
+	...func(*cloudwatch.Options),
+) (*cloudwatch.GetMetricDataOutput, error) {
 	return nil, nil
 }
 
@@ -371,7 +371,7 @@ func TestSelectMetrics(t *testing.T) {
 	require.NoError(t, err)
 	internalDuration := config.Duration(duration)
 	c := &CloudWatch{
-		CredentialConfig: internalaws.CredentialConfig{
+		CredentialConfig: common_aws.CredentialConfig{
 			Region: "us-east-1",
 		},
 		Namespace: "AWS/ELB",
@@ -379,10 +379,10 @@ func TestSelectMetrics(t *testing.T) {
 		Period:    internalDuration,
 		RateLimit: 200,
 		BatchSize: 500,
-		Metrics: []*Metric{
+		Metrics: []*cloudwatchMetric{
 			{
 				MetricNames: []string{"Latency", "RequestCount"},
-				Dimensions: []*Dimension{
+				Dimensions: []*dimension{
 					{
 						Name:  "LoadBalancerName",
 						Value: "lb*",
@@ -493,7 +493,7 @@ func TestGenerateStatisticsInputParamsFiltered(t *testing.T) {
 
 func TestMetricsCacheTimeout(t *testing.T) {
 	cache := &metricCache{
-		metrics: []filteredMetric{},
+		metrics: make([]filteredMetric, 0),
 		built:   time.Now(),
 		ttl:     time.Minute,
 	}

@@ -64,7 +64,7 @@ func New() *Shim {
 	}
 }
 
-func (s *Shim) watchForShutdown(cancel context.CancelFunc) {
+func (*Shim) watchForShutdown(cancel context.CancelFunc) {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -79,17 +79,17 @@ func (s *Shim) Run(pollInterval time.Duration) error {
 	if s.Input != nil {
 		err := s.RunInput(pollInterval)
 		if err != nil {
-			return fmt.Errorf("RunInput error: %w", err)
+			return fmt.Errorf("running input failed: %w", err)
 		}
 	} else if s.Processor != nil {
 		err := s.RunProcessor()
 		if err != nil {
-			return fmt.Errorf("RunProcessor error: %w", err)
+			return fmt.Errorf("running processor failed: %w", err)
 		}
 	} else if s.Output != nil {
 		err := s.RunOutput()
 		if err != nil {
-			return fmt.Errorf("RunOutput error: %w", err)
+			return fmt.Errorf("running output failed: %w", err)
 		}
 	} else {
 		return errors.New("nothing to run")
@@ -130,12 +130,12 @@ func (s *Shim) writeProcessedMetrics() error {
 }
 
 // LogName satisfies the MetricMaker interface
-func (s *Shim) LogName() string {
+func (*Shim) LogName() string {
 	return ""
 }
 
 // MakeMetric satisfies the MetricMaker interface
-func (s *Shim) MakeMetric(m telegraf.Metric) telegraf.Metric {
+func (*Shim) MakeMetric(m telegraf.Metric) telegraf.Metric {
 	return m // don't need to do anything to it.
 }
 

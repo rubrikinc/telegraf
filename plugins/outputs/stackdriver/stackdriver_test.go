@@ -62,7 +62,7 @@ func (s *mockMetricServer) CreateTimeSeries(ctx context.Context, req *monitoring
 	if s.err != nil {
 		var statusResp *status.Status
 		switch s.err.Error() {
-		case "InvalidArgument":
+		case "invalid argument":
 			statusResp = status.New(codes.InvalidArgument, s.err.Error())
 		default:
 			statusResp = status.New(codes.Unknown, s.err.Error())
@@ -616,12 +616,12 @@ func TestWriteIgnoredErrors(t *testing.T) {
 	}{
 		{
 			name:        "other errors reported",
-			err:         errors.New("Unknown"),
+			err:         errors.New("unknown"),
 			expectedErr: true,
 		},
 		{
 			name:        "invalid argument",
-			err:         errors.New("InvalidArgument"),
+			err:         errors.New("invalid argument"),
 			expectedErr: false,
 		},
 	}
@@ -1113,10 +1113,6 @@ func TestGenerateHistogramName(t *testing.T) {
 }
 
 func TestBuildHistogram(t *testing.T) {
-	s := &Stackdriver{
-		MetricNameFormat: "official",
-		Log:              testutil.Logger{},
-	}
 	m := testutil.MustMetric(
 		"http_server_duration",
 		map[string]string{},
@@ -1132,7 +1128,7 @@ func TestBuildHistogram(t *testing.T) {
 		},
 		time.Unix(0, 0),
 	)
-	value, err := s.buildHistogram(m)
+	value, err := buildHistogram(m)
 	require.NoError(t, err)
 
 	dist := value.GetDistributionValue()

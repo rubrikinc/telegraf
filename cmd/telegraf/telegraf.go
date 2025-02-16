@@ -40,6 +40,7 @@ type GlobalFlags struct {
 	configURLRetryAttempts int
 	configURLWatchInterval time.Duration
 	watchConfig            string
+	watchInterval          time.Duration
 	pidFile                string
 	plugindDir             string
 	password               string
@@ -213,7 +214,11 @@ func (t *Telegraf) watchLocalConfig(ctx context.Context, signals chan os.Signal,
 	var mytomb tomb.Tomb
 	var watcher watch.FileWatcher
 	if t.watchConfig == "poll" {
-		watcher = watch.NewPollingFileWatcher(fConfig)
+		if t.watchInterval > 0 {
+			watcher = watch.NewPollingFileWatcherWithDuration(fConfig, t.watchInterval)
+		} else {
+			watcher = watch.NewPollingFileWatcher(fConfig)
+		}
 	} else {
 		watcher = watch.NewInotifyFileWatcher(fConfig)
 	}
@@ -249,7 +254,7 @@ func (t *Telegraf) watchLocalConfig(ctx context.Context, signals chan os.Signal,
 	signals <- syscall.SIGHUP
 }
 
-func (t *Telegraf) watchRemoteConfigs(ctx context.Context, signals chan os.Signal, interval time.Duration, remoteConfigs []string) {
+func (*Telegraf) watchRemoteConfigs(ctx context.Context, signals chan os.Signal, interval time.Duration, remoteConfigs []string) {
 	configs := strings.Join(remoteConfigs, ", ")
 	log.Printf("I! Remote config watcher started for: %s\n", configs)
 
@@ -265,7 +270,7 @@ func (t *Telegraf) watchRemoteConfigs(ctx context.Context, signals chan os.Signa
 			return
 		case <-ticker.C:
 			for _, configURL := range remoteConfigs {
-				resp, err := http.Head(configURL) //nolint: gosec // user provided URL
+				resp, err := http.Head(configURL) //nolint:gosec // user provided URL
 				if err != nil {
 					log.Printf("W! Error fetching config URL, %s: %s\n", configURL, err)
 					continue
@@ -343,10 +348,10 @@ func (t *Telegraf) runAgent(ctx context.Context, reloadConfig bool) error {
 	}
 
 	if !(t.test || t.testWait != 0) && len(c.Outputs) == 0 {
-		return errors.New("no outputs found, did you provide a valid config file?")
+		return errors.New("no outputs found, probably invalid config file provided")
 	}
 	if t.plugindDir == "" && len(c.Inputs) == 0 {
-		return errors.New("no inputs found, did you provide a valid config file?")
+		return errors.New("no inputs found, probably invalid config file provided")
 	}
 
 	if int64(c.Agent.Interval) <= 0 {
@@ -359,14 +364,16 @@ func (t *Telegraf) runAgent(ctx context.Context, reloadConfig bool) error {
 
 	// Setup logging as configured.
 	logConfig := &logger.Config{
-		Debug:               c.Agent.Debug || t.debug,
-		Quiet:               c.Agent.Quiet || t.quiet,
-		LogTarget:           c.Agent.LogTarget,
-		Logfile:             c.Agent.Logfile,
-		RotationInterval:    time.Duration(c.Agent.LogfileRotationInterval),
-		RotationMaxSize:     int64(c.Agent.LogfileRotationMaxSize),
-		RotationMaxArchives: c.Agent.LogfileRotationMaxArchives,
-		LogWithTimezone:     c.Agent.LogWithTimezone,
+		Debug:                   c.Agent.Debug || t.debug,
+		Quiet:                   c.Agent.Quiet || t.quiet,
+		LogTarget:               c.Agent.LogTarget,
+		LogFormat:               c.Agent.LogFormat,
+		Logfile:                 c.Agent.Logfile,
+		StructuredLogMessageKey: c.Agent.StructuredLogMessageKey,
+		RotationInterval:        time.Duration(c.Agent.LogfileRotationInterval),
+		RotationMaxSize:         int64(c.Agent.LogfileRotationMaxSize),
+		RotationMaxArchives:     c.Agent.LogfileRotationMaxArchives,
+		LogWithTimezone:         c.Agent.LogWithTimezone,
 	}
 
 	if err := logger.SetupLogging(logConfig); err != nil {
@@ -419,7 +426,7 @@ func (t *Telegraf) runAgent(ctx context.Context, reloadConfig bool) error {
 			log.Printf("I! Found %d secrets...", c.NumberSecrets)
 			msg := fmt.Sprintf("Insufficient lockable memory %dkb when %dkb is required.", available, required)
 			msg += " Please increase the limit for Telegraf in your Operating System!"
-			log.Printf("W! " + color.RedString(msg))
+			log.Print("W! " + color.RedString(msg))
 		}
 	}
 	ag := agent.NewAgent(c)

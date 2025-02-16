@@ -20,25 +20,25 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-// Ipsets is a telegraf plugin to gather packets and bytes counters from ipset
-type Ipset struct {
-	IncludeUnmatchedSets bool
-	UseSudo              bool
-	Timeout              config.Duration
-	lister               setLister
-}
-
-type setLister func(Timeout config.Duration, UseSudo bool) (*bytes.Buffer, error)
+var defaultTimeout = config.Duration(time.Second)
 
 const measurement = "ipset"
 
-var defaultTimeout = config.Duration(time.Second)
+type Ipset struct {
+	IncludeUnmatchedSets bool            `toml:"include_unmatched_sets"`
+	UseSudo              bool            `toml:"use_sudo"`
+	Timeout              config.Duration `toml:"timeout"`
+
+	lister setLister
+}
+
+type setLister func(Timeout config.Duration, UseSudo bool) (*bytes.Buffer, error)
 
 func (*Ipset) SampleConfig() string {
 	return sampleConfig
 }
 
-func (i *Ipset) Init() error {
+func (*Ipset) Init() error {
 	_, err := exec.LookPath("ipset")
 	if err != nil {
 		return err

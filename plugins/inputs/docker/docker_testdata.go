@@ -40,15 +40,15 @@ var info = system.Info{
 		IndexConfigs: map[string]*registry.IndexInfo{
 			"docker.io": {
 				Name:     "docker.io",
-				Mirrors:  []string{},
+				Mirrors:  make([]string, 0),
 				Official: true,
 				Secure:   true,
 			},
-		}, InsecureRegistryCIDRs: []*registry.NetIPNet{{IP: []byte{127, 0, 0, 0}, Mask: []byte{255, 0, 0, 0}}}, Mirrors: []string{}},
+		}, InsecureRegistryCIDRs: []*registry.NetIPNet{{IP: []byte{127, 0, 0, 0}, Mask: []byte{255, 0, 0, 0}}}, Mirrors: make([]string, 0)},
 	OperatingSystem:  "Linux Mint LMDE (containerized)",
 	BridgeNfIptables: true,
 	HTTPSProxy:       "",
-	Labels:           []string{},
+	Labels:           make([]string, 0),
 	MemoryLimit:      false,
 	DriverStatus: [][2]string{
 		{"Pool Name", "docker-8:1-1182287-pool"},
@@ -171,7 +171,7 @@ var containerList = []types.Container{
 }
 
 var two = uint64(2)
-var ServiceList = []swarm.Service{
+var serviceList = []swarm.Service{
 	{
 		ID: "qolkls9g5iasdiuihcyz9rnx2",
 		Spec: swarm.ServiceSpec{
@@ -198,7 +198,7 @@ var ServiceList = []swarm.Service{
 	},
 }
 
-var TaskList = []swarm.Task{
+var taskList = []swarm.Task{
 	{
 		ID:        "kwh0lv7hwwbh",
 		ServiceID: "qolkls9g5iasdiuihcyz9rnx2",
@@ -228,7 +228,7 @@ var TaskList = []swarm.Task{
 	},
 }
 
-var NodeList = []swarm.Node{
+var nodeList = []swarm.Node{
 	{
 		ID: "0cl4jturcyd1ks3fwpd010kor",
 		Status: swarm.NodeStatus{
