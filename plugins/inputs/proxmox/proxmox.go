@@ -9,21 +9,49 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
+type Proxmox struct {
+	BaseURL               string          `toml:"base_url"`
+	APIToken              string          `toml:"api_token"`
+	ResponseTimeout       config.Duration `toml:"response_timeout"`
+	NodeName              string          `toml:"node_name"`
+	AdditionalVmstatsTags []string        `toml:"additional_vmstats_tags"`
+	Log                   telegraf.Logger `toml:"-"`
+	tls.ClientConfig
+
+	httpClient       *http.Client
+	nodeSearchDomain string
+
+	requestFunction func(apiUrl string, method string, data url.Values) ([]byte, error)
+}
+
 func (*Proxmox) SampleConfig() string {
 	return sampleConfig
 }
 
 func (px *Proxmox) Init() error {
+	// Check parameters
+	for _, v := range px.AdditionalVmstatsTags {
+		switch v {
+		case "vmid", "status":
+			// Do nothing as those are valid values
+		default:
+			return fmt.Errorf("invalid additional vmstats tag %q", v)
+		}
+	}
+
 	// Set hostname as default node name for backwards compatibility
 	if px.NodeName == "" {
 		//nolint:errcheck // best attempt setting of NodeName
@@ -42,6 +70,8 @@ func (px *Proxmox) Init() error {
 		Timeout: time.Duration(px.ResponseTimeout),
 	}
 
+	px.requestFunction = px.performRequest
+
 	return nil
 }
 
@@ -50,15 +80,15 @@ func (px *Proxmox) Gather(acc telegraf.Accumulator) error {
 		return fmt.Errorf("getting search domain failed: %w", err)
 	}
 
-	gatherLxcData(px, acc)
-	gatherQemuData(px, acc)
+	px.gatherVMData(acc, lxc)
+	px.gatherVMData(acc, qemu)
 
 	return nil
 }
 
 func (px *Proxmox) getNodeSearchDomain() error {
 	apiURL := "/nodes/" + px.NodeName + "/dns"
-	jsonData, err := px.requestFunction(px, apiURL, http.MethodGet, nil)
+	jsonData, err := px.requestFunction(apiURL, http.MethodGet, nil)
 	if err != nil {
 		return fmt.Errorf("requesting data failed: %w", err)
 	}
@@ -72,7 +102,7 @@ func (px *Proxmox) getNodeSearchDomain() error {
 	return nil
 }
 
-func performRequest(px *Proxmox, apiURL, method string, data url.Values) ([]byte, error) {
+func (px *Proxmox) performRequest(apiURL, method string, data url.Values) ([]byte, error) {
 	request, err := http.NewRequest(method, px.BaseURL+apiURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
@@ -93,24 +123,15 @@ func performRequest(px *Proxmox, apiURL, method string, data url.Values) ([]byte
 	return responseBody, nil
 }
 
-func gatherLxcData(px *Proxmox, acc telegraf.Accumulator) {
-	gatherVMData(px, acc, lxc)
-}
-
-func gatherQemuData(px *Proxmox, acc telegraf.Accumulator) {
-	gatherVMData(px, acc, qemu)
-}
-
-func gatherVMData(px *Proxmox, acc telegraf.Accumulator, rt resourceType) {
-	vmStats, err := getVMStats(px, rt)
+func (px *Proxmox) gatherVMData(acc telegraf.Accumulator, rt resourceType) {
+	vmStats, err := px.getVMStats(rt)
 	if err != nil {
 		px.Log.Errorf("Error getting VM stats: %v", err)
 		return
 	}
 
-	// For each VM add metrics to Accumulator
 	for _, vmStat := range vmStats.Data {
-		vmConfig, err := getVMConfig(px, vmStat.ID, rt)
+		vmConfig, err := px.getVMConfig(vmStat.ID, rt)
 		if err != nil {
 			px.Log.Errorf("Error getting VM config: %v", err)
 			return
@@ -150,6 +171,12 @@ func gatherVMData(px *Proxmox, acc telegraf.Accumulator, rt resourceType) {
 			"vm_fqdn":   vmFQDN,
 			"vm_type":   string(rt),
 		}
+		if slices.Contains(px.AdditionalVmstatsTags, "vmid") {
+			tags["vm_id"] = vmStat.ID.String()
+		}
+		if slices.Contains(px.AdditionalVmstatsTags, "status") {
+			tags["status"] = currentVMStatus.Status
+		}
 
 		memMetrics := getByteMetrics(currentVMStatus.TotalMem, currentVMStatus.UsedMem)
 		swapMetrics := getByteMetrics(currentVMStatus.TotalSwap, currentVMStatus.UsedSwap)
@@ -178,7 +205,7 @@ func gatherVMData(px *Proxmox, acc telegraf.Accumulator, rt resourceType) {
 
 func (px *Proxmox) getCurrentVMStatus(rt resourceType, id json.Number) (vmStat, error) {
 	apiURL := "/nodes/" + px.NodeName + "/" + string(rt) + "/" + string(id) + "/status/current"
-	jsonData, err := px.requestFunction(px, apiURL, http.MethodGet, nil)
+	jsonData, err := px.requestFunction(apiURL, http.MethodGet, nil)
 	if err != nil {
 		return vmStat{}, err
 	}
@@ -192,9 +219,9 @@ func (px *Proxmox) getCurrentVMStatus(rt resourceType, id json.Number) (vmStat, 
 	return currentVMStatus.Data, nil
 }
 
-func getVMStats(px *Proxmox, rt resourceType) (vmStats, error) {
+func (px *Proxmox) getVMStats(rt resourceType) (vmStats, error) {
 	apiURL := "/nodes/" + px.NodeName + "/" + string(rt)
-	jsonData, err := px.requestFunction(px, apiURL, http.MethodGet, nil)
+	jsonData, err := px.requestFunction(apiURL, http.MethodGet, nil)
 	if err != nil {
 		return vmStats{}, err
 	}
@@ -208,9 +235,9 @@ func getVMStats(px *Proxmox, rt resourceType) (vmStats, error) {
 	return vmStatistics, nil
 }
 
-func getVMConfig(px *Proxmox, vmID json.Number, rt resourceType) (vmConfig, error) {
+func (px *Proxmox) getVMConfig(vmID json.Number, rt resourceType) (vmConfig, error) {
 	apiURL := "/nodes/" + px.NodeName + "/" + string(rt) + "/" + string(vmID) + "/config"
-	jsonData, err := px.requestFunction(px, apiURL, http.MethodGet, nil)
+	jsonData, err := px.requestFunction(apiURL, http.MethodGet, nil)
 	if err != nil {
 		return vmConfig{}, err
 	}
@@ -261,8 +288,6 @@ func jsonNumberToFloat64(value json.Number) float64 {
 
 func init() {
 	inputs.Add("proxmox", func() telegraf.Input {
-		return &Proxmox{
-			requestFunction: performRequest,
-		}
+		return &Proxmox{}
 	})
 }

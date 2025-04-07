@@ -60,7 +60,7 @@ func TestRegistry(t *testing.T) {
 func TestSampleConfig(t *testing.T) {
 	cfg := config.NewConfig()
 
-	require.NoError(t, cfg.LoadConfigData(testutil.DefaultSampleConfig((&Lookup{}).SampleConfig())))
+	require.NoError(t, cfg.LoadConfigData(testutil.DefaultSampleConfig((&Lookup{}).SampleConfig()), config.EmptySourcePath))
 }
 
 func TestInit(t *testing.T) {

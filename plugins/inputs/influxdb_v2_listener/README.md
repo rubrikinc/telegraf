@@ -10,6 +10,7 @@ to the output plugins configuration.
 
 ⭐ Telegraf v1.16.0
 🏷️ datastores
+🏷️ datastore
 💻 all
 
 [influxdb_http_api]: https://docs.influxdata.com/influxdb/v2/api/

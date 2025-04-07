@@ -8,6 +8,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -37,7 +38,8 @@ var (
 
 type Tail struct {
 	Files               []string `toml:"files"`
-	FromBeginning       bool     `toml:"from_beginning"`
+	FromBeginning       bool     `toml:"from_beginning" deprecated:"1.34.0;1.40.0;use 'initial_read_offset' with value 'beginning' instead"`
+	InitialReadOffset   string   `toml:"initial_read_offset"`
 	Pipe                bool     `toml:"pipe"`
 	WatchMethod         string   `toml:"watch_method"`
 	MaxUndeliveredLines int      `toml:"max_undelivered_lines"`
@@ -76,6 +78,24 @@ func (t *Tail) SetParserFunc(fn telegraf.ParserFunc) {
 }
 
 func (t *Tail) Init() error {
+	// Backward compatibility setting
+	if t.InitialReadOffset == "" {
+		if t.FromBeginning {
+			t.InitialReadOffset = "beginning"
+		} else {
+			t.InitialReadOffset = "saved-or-end"
+		}
+	}
+
+	// Check settings
+	switch t.InitialReadOffset {
+	case "":
+		t.InitialReadOffset = "saved-or-end"
+	case "beginning", "end", "saved-or-end", "saved-or-beginning":
+	default:
+		return fmt.Errorf("invalid 'initial_read_offset' setting %q", t.InitialReadOffset)
+	}
+
 	if t.MaxUndeliveredLines == 0 {
 		return errors.New("max_undelivered_lines must be positive")
 	}
@@ -86,12 +106,17 @@ func (t *Tail) Init() error {
 			t.filterColors = true
 		}
 	}
+
 	// init offsets
 	t.offsets = make(map[string]int64)
 
-	var err error
-	t.decoder, err = encoding.NewDecoder(t.CharacterEncoding)
-	return err
+	dec, err := encoding.NewDecoder(t.CharacterEncoding)
+	if err != nil {
+		return fmt.Errorf("creating decoder failed: %w", err)
+	}
+	t.decoder = dec
+
+	return nil
 }
 
 func (t *Tail) Start(acc telegraf.Accumulator) error {
@@ -119,16 +144,49 @@ func (t *Tail) Start(acc telegraf.Accumulator) error {
 		return err
 	}
 
-	t.tailers = make(map[string]*tail.Tail)
+	t.cancel()
+	t.wg.Wait()
 
-	err = t.tailNewFiles(t.FromBeginning)
+	err = t.tailNewFiles()
+	if err != nil {
+		return err
+	}
 
 	// assumption that once Start is called, all parallel plugins have already been initialized
 	offsetsMutex.Lock()
-	offsets = make(map[string]int64)
+	for k, v := range t.offsets {
+		offsets[k] = v
+	}
 	offsetsMutex.Unlock()
+}
 
-	return err
+func (t *Tail) getSeekInfo(file string) (*tail.SeekInfo, error) {
+	// Pipes do not support seeking
+	if t.Pipe {
+		return nil, nil
+	}
+
+	// Determine the actual position for continuing
+	switch t.InitialReadOffset {
+	case "beginning":
+		return &tail.SeekInfo{Whence: 0, Offset: 0}, nil
+	case "end":
+		return &tail.SeekInfo{Whence: 2, Offset: 0}, nil
+	case "", "saved-or-end":
+		if offset, ok := t.offsets[file]; ok {
+			t.Log.Debugf("Using offset %d for %q", offset, file)
+			return &tail.SeekInfo{Whence: 0, Offset: offset}, nil
+		}
+		return &tail.SeekInfo{Whence: 2, Offset: 0}, nil
+	case "saved-or-beginning":
+		if offset, ok := t.offsets[file]; ok {
+			t.Log.Debugf("Using offset %d for %q", offset, file)
+			return &tail.SeekInfo{Whence: 0, Offset: offset}, nil
+		}
+		return &tail.SeekInfo{Whence: 0, Offset: 0}, nil
+	default:
+		return nil, errors.New("invalid 'initial_read_offset' setting")
+	}
 }
 
 func (t *Tail) GetState() interface{} {
@@ -147,12 +205,12 @@ func (t *Tail) SetState(state interface{}) error {
 }
 
 func (t *Tail) Gather(_ telegraf.Accumulator) error {
-	return t.tailNewFiles(true)
+	return t.tailNewFiles()
 }
 
 func (t *Tail) Stop() {
 	for _, tailer := range t.tailers {
-		if !t.Pipe && !t.FromBeginning {
+		if !t.Pipe {
 			// store offset for resume
 			offset, err := tailer.Tell()
 			if err == nil {
@@ -179,7 +237,7 @@ func (t *Tail) Stop() {
 	offsetsMutex.Unlock()
 }
 
-func (t *Tail) tailNewFiles(fromBeginning bool) error {
+func (t *Tail) tailNewFiles() error {
 	var poll bool
 	if t.WatchMethod == "poll" {
 		poll = true
@@ -197,20 +255,9 @@ func (t *Tail) tailNewFiles(fromBeginning bool) error {
 				continue
 			}
 
-			var seek *tail.SeekInfo
-			if !t.Pipe && !fromBeginning {
-				if offset, ok := t.offsets[file]; ok {
-					t.Log.Debugf("Using offset %d for %q", offset, file)
-					seek = &tail.SeekInfo{
-						Whence: 0,
-						Offset: offset,
-					}
-				} else {
-					seek = &tail.SeekInfo{
-						Whence: 2,
-						Offset: 0,
-					}
-				}
+			seek, err := t.getSeekInfo(file)
+			if err != nil {
+				return err
 			}
 
 			tailer, err := tail.TailFile(file,
@@ -402,7 +449,6 @@ func newTail() *Tail {
 	offsetsMutex.Unlock()
 
 	return &Tail{
-		FromBeginning:       false,
 		MaxUndeliveredLines: 1000,
 		offsets:             offsetsCopy,
 		PathTag:             "path",

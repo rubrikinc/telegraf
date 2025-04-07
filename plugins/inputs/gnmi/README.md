@@ -75,6 +75,10 @@ details on how to use them.
   ## gRPC Maximum Message Size
   # max_msg_size = "4MB"
 
+  ## Subtree depth for depth extension (disables if < 1)
+  ## see https://github.com/openconfig/reference/blob/master/rpc/gnmi/gnmi-depth.md
+  # depth = 0
+
   ## Enable to get the canonical path as field-name
   # canonical_field_names = false
 
