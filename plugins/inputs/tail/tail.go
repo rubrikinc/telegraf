@@ -158,6 +158,8 @@ func (t *Tail) Start(acc telegraf.Accumulator) error {
 		offsets[k] = v
 	}
 	offsetsMutex.Unlock()
+
+	return err
 }
 
 func (t *Tail) getSeekInfo(file string) (*tail.SeekInfo, error) {
