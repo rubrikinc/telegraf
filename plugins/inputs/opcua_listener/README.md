@@ -8,7 +8,7 @@ Plugin minimum tested version: 1.25
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -287,6 +287,14 @@ opcua,id=ns\=3;s\=Temperature temp=79.0,Quality="OK (0x0)",DataType="Float" 1597
 ```
 
 ## Group Configuration
+If the value is an array, each element is unpacked into a field  
+using indexed keys. For example:
+
+```text
+opcua,id=ns\=3;s\=Temperature temp[0]=79.0,temp[1]=38.9,Quality="OK (0x0)",DataType="Float" 1597820490000000000
+```
+
+#### Group Configuration
 
 Groups can set default values for the namespace, identifier type, tags
 settings and sampling interval.  The default values apply to all the

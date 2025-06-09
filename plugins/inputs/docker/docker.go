@@ -55,7 +55,6 @@ const (
 	defaultEndpoint = "unix:///var/run/docker.sock"
 )
 
-// Docker object
 type Docker struct {
 	Endpoint       string   `toml:"endpoint"`
 	ContainerNames []string `toml:"container_names" deprecated:"1.4.0;1.35.0;use 'container_name_include' instead"`
@@ -236,7 +235,7 @@ func (d *Docker) Gather(acc telegraf.Accumulator) error {
 	var wg sync.WaitGroup
 	wg.Add(len(containers))
 	for _, cntnr := range containers {
-		go func(c types.Container) {
+		go func(c container.Summary) {
 			defer wg.Done()
 			if err := d.gatherContainer(c, acc); err != nil {
 				acc.AddError(err)
@@ -479,7 +478,7 @@ func parseContainerName(containerNames []string) string {
 }
 
 func (d *Docker) gatherContainer(
-	cntnr types.Container,
+	cntnr container.Summary,
 	acc telegraf.Accumulator,
 ) error {
 	var v *container.StatsResponse
@@ -540,7 +539,7 @@ func (d *Docker) gatherContainer(
 }
 
 func (d *Docker) gatherContainerInspect(
-	cntnr types.Container,
+	cntnr container.Summary,
 	acc telegraf.Accumulator,
 	tags map[string]string,
 	daemonOSType string,
