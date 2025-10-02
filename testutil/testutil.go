@@ -57,24 +57,6 @@ func GetRandomString(chars int) string {
 	return string(buffer)
 }
 
-// GetRandomString returns a random alphanumerical string of the given length.
-// Please note, this function is different to `internal.RandomString` as it will
-// not use `crypto.Rand` and will therefore not rely on the entropy-pool of the
-// host which might be drained e.g. in CI pipelines. This is useful to e.g.
-// create random passwords for tests where security is not a concern.
-func GetRandomString(chars int) string {
-	charset := []byte("abcdefghijklmnopqrstABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-
-	nchars := len(charset)
-	buffer := make([]byte, chars)
-	for i := range chars {
-		//nolint:gosec // Using a weak random number generator on purpose to not drain entropy
-		buffer[i] = charset[rand.Intn(nchars)]
-	}
-
-	return string(buffer)
-}
-
 // MockMetrics returns a mock []telegraf.Metric object for using in unit tests
 // of telegraf output sinks.
 func MockMetrics() []telegraf.Metric {
