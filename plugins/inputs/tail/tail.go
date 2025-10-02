@@ -145,8 +145,7 @@ func (t *Tail) Start(acc telegraf.Accumulator) error {
 		return err
 	}
 
-	t.cancel()
-	t.wg.Wait()
+	t.tailers = make(map[string]*tail.Tail)
 
 	err = t.tailNewFiles()
 	if err != nil {
@@ -155,9 +154,7 @@ func (t *Tail) Start(acc telegraf.Accumulator) error {
 
 	// assumption that once Start is called, all parallel plugins have already been initialized
 	offsetsMutex.Lock()
-	for k, v := range t.offsets {
-		offsets[k] = v
-	}
+	offsets = make(map[string]int64)
 	offsetsMutex.Unlock()
 
 	return err

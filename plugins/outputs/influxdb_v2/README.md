@@ -19,9 +19,9 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 ## Secret-store support
 
-This plugin supports secrets from secret-stores for the `token` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
-to use them.
+This plugin supports secrets from secret-stores for the `token` and
+`http_headers` option. See the [secret-store documentation][SECRETSTORE] for
+more details on how to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
 
@@ -107,6 +107,12 @@ to use them.
   # rate_limit = "unlimited"
   ## Fixed time-window for the available payload size e.g. "5m"
   # rate_limit_period = "0s"
+
+  ## Number of concurrent writes to the output
+  ## When set to one sequential sending is used (default).
+  ## NOTE: When using two or more concurrent writes the sending order of
+  ##       metrics is not guaranteed!
+  # concurrent_writes = 1
 ```
 
 ## Metrics
