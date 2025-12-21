@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,6 +54,11 @@ var (
 	// environment variable replacement behavior
 	OldEnvVarReplacement = false
 
+	// NonStrictEnvVarHandling allows to disable strict and safe environment
+	// variables handling. Strict handling cannot replace non-string settings
+	// so this option must be used in those use-cases.
+	NonStrictEnvVarHandling = true
+
 	// PrintPluginConfigSource is a switch to enable printing of plugin sources
 	PrintPluginConfigSource = false
 
@@ -61,6 +67,10 @@ var (
 
 	// telegrafVersion contains the parsed semantic Telegraf version
 	telegrafVersion *semver.Version = semver.New("0.0.0-unknown")
+
+	// List of (redacted) configuration Sources
+	sources   []string
+	sourcesMu sync.Mutex
 )
 
 const EmptySourcePath string = ""
@@ -105,7 +115,7 @@ type Config struct {
 	seenAgentTableOnce sync.Once
 }
 
-// Ordered plugins used to keep the order in which they appear in a file
+// OrderedPlugin is used to keep the order in which they appear in a file
 type OrderedPlugin struct {
 	Line   int
 	plugin any
@@ -158,6 +168,11 @@ func NewConfig() *Config {
 		MissingField:  c.missingTomlField,
 	}
 	c.toml = tomlCfg
+
+	// Initialize the configuration source list
+	sourcesMu.Lock()
+	sources = make([]string, 0)
+	sourcesMu.Unlock()
 
 	return c
 }
@@ -214,16 +229,6 @@ type AgentConfig struct {
 	// multiple of MetricBatchSize. Due to current implementation, this could
 	// not be less than 2 times MetricBatchSize.
 	MetricBufferLimit int
-
-	// FlushBufferWhenFull tells Telegraf to flush the metric buffer whenever
-	// it fills up, regardless of FlushInterval. Setting this option to true
-	// does _not_ deactivate FlushInterval.
-	FlushBufferWhenFull bool `toml:"flush_buffer_when_full" deprecated:"0.13.0;1.35.0;option is ignored"`
-
-	// TODO(cam): Remove UTC and parameter, they are no longer
-	// valid for the agent config. Leaving them here for now for backwards-
-	// compatibility
-	UTC bool `toml:"utc" deprecated:"1.0.0;1.35.0;option is ignored"`
 
 	// Debug is the option for running in debug mode
 	Debug bool `toml:"debug"`
@@ -478,7 +483,7 @@ func WalkDirectory(path string) ([]string, error) {
 	return files, filepath.Walk(path, walkfn)
 }
 
-// Try to find a default config file at these locations (in order):
+// GetDefaultConfigPath will try to find a default config file at these locations (in order):
 //  1. $TELEGRAF_CONFIG_PATH
 //  2. $HOME/.telegraf/telegraf.conf
 //  3. /etc/telegraf/telegraf.conf and /etc/telegraf/telegraf.d/*.conf
@@ -841,7 +846,13 @@ func LoadConfigFileWithRetries(config string, urlRetryAttempts int) ([]byte, boo
 		switch u.Scheme {
 		case "https", "http":
 			data, err := fetchConfig(u, urlRetryAttempts)
-			return data, true, err
+			if err != nil {
+				return nil, true, err
+			}
+			sourcesMu.Lock()
+			sources = append(sources, u.Redacted())
+			sourcesMu.Unlock()
+			return data, true, nil
 		default:
 			return nil, true, fmt.Errorf("scheme %q not supported", u.Scheme)
 		}
@@ -852,6 +863,9 @@ func LoadConfigFileWithRetries(config string, urlRetryAttempts int) ([]byte, boo
 	if err != nil {
 		return nil, false, err
 	}
+	sourcesMu.Lock()
+	sources = append(sources, config)
+	sourcesMu.Unlock()
 
 	mimeType := http.DetectContentType(buffer)
 	if !strings.Contains(mimeType, "text/plain") {
@@ -859,6 +873,13 @@ func LoadConfigFileWithRetries(config string, urlRetryAttempts int) ([]byte, boo
 	}
 
 	return buffer, false, nil
+}
+
+// GetSources returns the redacted list of configuration sources
+func GetSources() []string {
+	sourcesMu.Lock()
+	defer sourcesMu.Unlock()
+	return slices.Clone(sources)
 }
 
 func fetchConfig(u *url.URL, urlRetryAttempts int) ([]byte, error) {
@@ -931,11 +952,18 @@ func parseConfig(contents []byte) (*ast.Table, error) {
 	if err != nil {
 		return nil, err
 	}
-	outputBytes, err := substituteEnvironment(contents, OldEnvVarReplacement)
-	if err != nil {
-		return nil, err
+
+	// Use non-strict mode
+	if NonStrictEnvVarHandling {
+		output, err := substituteEnvironmentNonStrict(contents, OldEnvVarReplacement)
+		if err != nil {
+			return nil, err
+		}
+		return toml.Parse(output)
 	}
-	return toml.Parse(outputBytes)
+
+	// Use strict mode (default)
+	return substituteEnvironmentStrict(contents, OldEnvVarReplacement)
 }
 
 func (c *Config) addAggregator(name, source string, table *ast.Table) error {
@@ -996,6 +1024,11 @@ func (c *Config) addSecretStore(name, source string, table *ast.Table) error {
 		return fmt.Errorf("invalid secret-store ID %q, must only contain letters, numbers or underscore", storeID)
 	}
 
+	tags := map[string]string{
+		"_id":         storeID,
+		"secretstore": name,
+	}
+
 	creator, ok := secretstores.SecretStores[name]
 	if !ok {
 		// Handle removed, deprecated plugins
@@ -1017,6 +1050,7 @@ func (c *Config) addSecretStore(name, source string, table *ast.Table) error {
 
 	logger := logging.New("secretstores", name, "")
 	models.SetLoggerOnPlugin(store, logger)
+	models.SetStatisticsOnPlugin(store, logger, tags)
 
 	if err := store.Init(); err != nil {
 		return fmt.Errorf("error initializing secret-store %q: %w", storeID, err)

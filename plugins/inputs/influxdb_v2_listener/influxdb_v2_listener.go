@@ -45,15 +45,16 @@ type InfluxDBV2Listener struct {
 	port           int
 	common_tls.ServerConfig
 
-	MaxUndeliveredMetrics int             `toml:"max_undelivered_metrics"`
-	ReadTimeout           config.Duration `toml:"read_timeout"`
-	WriteTimeout          config.Duration `toml:"write_timeout"`
-	MaxBodySize           config.Size     `toml:"max_body_size"`
-	Token                 config.Secret   `toml:"token"`
-	BucketTag             string          `toml:"bucket_tag"`
-	ParserType            string          `toml:"parser_type"`
-
-	Log telegraf.Logger `toml:"-"`
+	MaxUndeliveredMetrics int                 `toml:"max_undelivered_metrics"`
+	ReadTimeout           config.Duration     `toml:"read_timeout"`
+	WriteTimeout          config.Duration     `toml:"write_timeout"`
+	MaxBodySize           config.Size         `toml:"max_body_size"`
+	Token                 config.Secret       `toml:"token"`
+	BucketTag             string              `toml:"bucket_tag"`
+	ParserType            string              `toml:"parser_type"`
+	UseInternalStatistics bool                `toml:"use_internal_statistics"`
+	Statistics            *selfstat.Collector `toml:"-"`
+	Log                   telegraf.Logger     `toml:"-"`
 
 	ctx                 context.Context
 	cancel              context.CancelFunc
@@ -76,6 +77,7 @@ type InfluxDBV2Listener struct {
 	readysServed    selfstat.Stat
 	requestsRecv    selfstat.Stat
 	notFoundsServed selfstat.Stat
+	pingsServed     selfstat.Stat
 
 	authFailures selfstat.Stat
 
@@ -96,14 +98,33 @@ func (h *InfluxDBV2Listener) Init() error {
 	tags := map[string]string{
 		"address": h.ServiceAddress,
 	}
-	h.bytesRecv = selfstat.Register("influxdb_v2_listener", "bytes_received", tags)
-	h.requestsServed = selfstat.Register("influxdb_v2_listener", "requests_served", tags)
-	h.writesServed = selfstat.Register("influxdb_v2_listener", "writes_served", tags)
-	h.healthsServed = selfstat.Register("influxdb_v2_listener", "healths_served", tags)
-	h.readysServed = selfstat.Register("influxdb_v2_listener", "readys_served", tags)
-	h.requestsRecv = selfstat.Register("influxdb_v2_listener", "requests_received", tags)
-	h.notFoundsServed = selfstat.Register("influxdb_v2_listener", "not_founds_served", tags)
-	h.authFailures = selfstat.Register("influxdb_v2_listener", "auth_failures", tags)
+	if !h.UseInternalStatistics {
+		h.bytesRecv = selfstat.Register("influxdb_v2_listener", "bytes_received", tags)
+		h.requestsServed = selfstat.Register("influxdb_v2_listener", "requests_served", tags)
+		h.writesServed = selfstat.Register("influxdb_v2_listener", "writes_served", tags)
+		h.healthsServed = selfstat.Register("influxdb_v2_listener", "healths_served", tags)
+		h.readysServed = selfstat.Register("influxdb_v2_listener", "readys_served", tags)
+		h.requestsRecv = selfstat.Register("influxdb_v2_listener", "requests_received", tags)
+		h.notFoundsServed = selfstat.Register("influxdb_v2_listener", "not_founds_served", tags)
+		h.pingsServed = selfstat.Register("influxdb_v2_listener", "pings_served", tags)
+		h.authFailures = selfstat.Register("influxdb_v2_listener", "auth_failures", tags)
+		config.PrintOptionValueDeprecationNotice("inputs.influxdb_v2_listener", "use_internal_statistics", false, telegraf.DeprecationInfo{
+			Since:     "1.37.0",
+			RemovalIn: "1.45.0",
+			Notice:    "please update to 'use_internal_statistics = true'",
+		})
+	} else {
+		h.bytesRecv = h.Statistics.Register("influxdb_v2_listener", "bytes_received", tags)
+		h.requestsServed = h.Statistics.Register("influxdb_v2_listener", "requests_served", tags)
+		h.writesServed = h.Statistics.Register("influxdb_v2_listener", "writes_served", tags)
+		h.healthsServed = h.Statistics.Register("influxdb_v2_listener", "healths_served", tags)
+		h.readysServed = h.Statistics.Register("influxdb_v2_listener", "readys_served", tags)
+		h.requestsRecv = h.Statistics.Register("influxdb_v2_listener", "requests_received", tags)
+		h.notFoundsServed = h.Statistics.Register("influxdb_v2_listener", "not_founds_served", tags)
+		h.pingsServed = h.Statistics.Register("influxdb_v2_listener", "pings_served", tags)
+		h.authFailures = h.Statistics.Register("influxdb_v2_listener", "auth_failures", tags)
+	}
+
 	if err := h.routes(); err != nil {
 		return err
 	}
@@ -228,6 +249,7 @@ func (h *InfluxDBV2Listener) routes() error {
 	h.mux.Handle("/api/v2/ready", h.handleReady())
 	h.mux.Handle("/health", h.handleHealth())
 	h.mux.Handle("/ready", h.handleReady())
+	h.mux.Handle("/ping", h.handlePing())
 	h.mux.Handle("/", authHandler(h.handleDefault()))
 
 	return nil
@@ -291,6 +313,15 @@ func (h *InfluxDBV2Listener) handleDefault() http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		defer h.notFoundsServed.Incr(1)
 		http.NotFound(res, req)
+	}
+}
+
+func (h *InfluxDBV2Listener) handlePing() http.HandlerFunc {
+	return func(res http.ResponseWriter, _ *http.Request) {
+		defer h.pingsServed.Incr(1)
+		res.Header().Set("X-Influxdb-Build", "telegraf")
+		res.Header().Set("X-Influxdb-Version", internal.FormatFullVersion())
+		res.WriteHeader(http.StatusNoContent)
 	}
 }
 
