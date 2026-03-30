@@ -57,7 +57,7 @@ var (
 	// NonStrictEnvVarHandling allows to disable strict and safe environment
 	// variables handling. Strict handling cannot replace non-string settings
 	// so this option must be used in those use-cases.
-	NonStrictEnvVarHandling = true
+	NonStrictEnvVarHandling = false
 
 	// PrintPluginConfigSource is a switch to enable printing of plugin sources
 	PrintPluginConfigSource = false
@@ -304,6 +304,12 @@ type AgentConfig struct {
 	// BufferDirectory is the directory to store buffer files for serialized
 	// to disk metrics when using the "disk_write_through" buffer strategy.
 	BufferDirectory string `toml:"buffer_directory"`
+
+	// BufferDiskSync controls writes durability when "disk" buffer strategy
+	// is used. No sync offers better write performance at the risk of losing
+	// metrics buffered in the last `flush_interval` in the event of a power
+	// cut.
+	BufferDiskSync *bool `toml:"buffer_disk_sync"`
 }
 
 // InputNames returns a list of strings of the configured inputs.
@@ -458,9 +464,15 @@ func sliceContains(name string, list []string) bool {
 
 // WalkDirectory collects all toml files that need to be loaded
 func WalkDirectory(path string) ([]string, error) {
+	// Check permissions of the directly specified directories and error
+	// out if those are not readable
+	if _, err := os.ReadDir(path); err != nil {
+		return nil, err
+	}
+
 	var files []string
-	walkfn := func(thispath string, info os.FileInfo, _ error) error {
-		if info == nil {
+	walkfn := func(thispath string, info os.FileInfo, err error) error {
+		if info == nil || errors.Is(err, os.ErrPermission) {
 			log.Printf("W! Telegraf is not permitted to read %s", thispath)
 			return nil
 		}
@@ -633,6 +645,9 @@ func (c *Config) LoadConfigData(data []byte, path string) error {
 		}
 		if err = c.toml.UnmarshalTable(subTable, c.Agent); err != nil {
 			return fmt.Errorf("error parsing [agent]: %w", err)
+		}
+		if c.Agent.CollectionOffset < 0 {
+			return fmt.Errorf("agent collection_offset must not be negative, found %v", c.Agent.CollectionOffset)
 		}
 	}
 
@@ -1408,7 +1423,10 @@ func (c *Config) addOutput(name, source string, table *ast.Table) error {
 		}
 	}
 
-	ro := models.NewRunningOutput(output, outputConfig, c.Agent.MetricBatchSize, c.Agent.MetricBufferLimit)
+	ro, err := models.NewRunningOutput(output, outputConfig, c.Agent.MetricBatchSize, c.Agent.MetricBufferLimit)
+	if err != nil {
+		return err
+	}
 	c.Outputs = append(c.Outputs, ro)
 
 	return nil
@@ -1683,6 +1701,9 @@ func (c *Config) buildInput(name, source string, tbl *ast.Table) (*models.InputC
 	cp.Precision, _ = c.getFieldDuration(tbl, "precision")
 	cp.CollectionJitter, _ = c.getFieldDuration(tbl, "collection_jitter")
 	cp.CollectionOffset, _ = c.getFieldDuration(tbl, "collection_offset")
+	if cp.CollectionOffset < 0 {
+		return nil, fmt.Errorf("negative collection_offset %q is not allowed", cp.CollectionOffset)
+	}
 	cp.StartupErrorBehavior = c.getFieldString(tbl, "startup_error_behavior")
 	cp.TimeSource = c.getFieldString(tbl, "time_source")
 
@@ -1730,12 +1751,18 @@ func (c *Config) buildOutput(name, source string, tbl *ast.Table) (*models.Outpu
 	if bufferStrategy == "disk" {
 		bufferStrategy = "disk_write_through"
 	}
+	bufferDiskSync := true
+	if c.Agent.BufferDiskSync != nil {
+		bufferDiskSync = *c.Agent.BufferDiskSync
+	}
+
 	oc := &models.OutputConfig{
 		Name:            name,
 		Source:          source,
 		Filter:          filter,
 		BufferStrategy:  bufferStrategy,
 		BufferDirectory: c.Agent.BufferDirectory,
+		BufferDiskSync:  bufferDiskSync,
 	}
 
 	// TODO: support FieldPass/FieldDrop on outputs
@@ -1768,7 +1795,7 @@ func (c *Config) missingTomlField(_ reflect.Type, key string) error {
 	switch key {
 	// General options to ignore
 	case "alias", "always_include_local_tags",
-		"buffer_strategy", "buffer_directory",
+		"buffer_strategy", "buffer_directory", "buffer_disk_sync",
 		"collection_jitter", "collection_offset",
 		"data_format", "delay", "drop", "drop_original",
 		"fielddrop", "fieldexclude", "fieldinclude", "fieldpass", "flush_interval", "flush_jitter",

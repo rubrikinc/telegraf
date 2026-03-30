@@ -12,6 +12,7 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/internal"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/selfstat"
 	"github.com/influxdata/telegraf/testutil"
 )
@@ -42,18 +43,18 @@ func TestRunningOutputDropFilter(t *testing.T) {
 	require.NoError(t, conf.Filter.Compile())
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
-	for _, metric := range first5 {
-		ro.AddMetric(metric)
+	for _, mt := range first5 {
+		ro.AddMetric(mt)
 	}
-	for _, metric := range next5 {
-		ro.AddMetric(metric)
+	for _, mt := range next5 {
+		ro.AddMetric(mt)
 	}
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 8)
 }
 
@@ -67,18 +68,18 @@ func TestRunningOutputPassFilter(t *testing.T) {
 	require.NoError(t, conf.Filter.Compile())
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
-	for _, metric := range first5 {
-		ro.AddMetric(metric)
+	for _, mt := range first5 {
+		ro.AddMetric(mt)
 	}
-	for _, metric := range next5 {
-		ro.AddMetric(metric)
+	for _, mt := range next5 {
+		ro.AddMetric(mt)
 	}
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 10)
 }
 
@@ -92,13 +93,13 @@ func TestRunningOutputTagIncludeNoMatch(t *testing.T) {
 	require.NoError(t, conf.Filter.Compile())
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
 	ro.AddMetric(testutil.TestMetric(101, "metric1"))
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 1)
 	require.Empty(t, m.Metrics()[0].Tags())
 }
@@ -113,13 +114,13 @@ func TestRunningOutputTagExcludeMatch(t *testing.T) {
 	require.NoError(t, conf.Filter.Compile())
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
 	ro.AddMetric(testutil.TestMetric(101, "metric1"))
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 1)
 	require.Empty(t, m.Metrics()[0].Tags())
 }
@@ -134,13 +135,13 @@ func TestRunningOutputTagExcludeNoMatch(t *testing.T) {
 	require.NoError(t, conf.Filter.Compile())
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
 	ro.AddMetric(testutil.TestMetric(101, "metric1"))
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 1)
 	require.Len(t, m.Metrics()[0].Tags(), 1)
 }
@@ -155,13 +156,13 @@ func TestRunningOutputTagIncludeMatch(t *testing.T) {
 	require.NoError(t, conf.Filter.Compile())
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
 	ro.AddMetric(testutil.TestMetric(101, "metric1"))
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 1)
 	require.Len(t, m.Metrics()[0].Tags(), 1)
 }
@@ -173,13 +174,13 @@ func TestRunningOutputNameOverride(t *testing.T) {
 	}
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
 	ro.AddMetric(testutil.TestMetric(101, "metric1"))
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 1)
 	require.Equal(t, "new_metric_name", m.Metrics()[0].Name())
 }
@@ -191,13 +192,13 @@ func TestRunningOutputNamePrefix(t *testing.T) {
 	}
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
 	ro.AddMetric(testutil.TestMetric(101, "metric1"))
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 1)
 	require.Equal(t, "prefix_metric1", m.Metrics()[0].Name())
 }
@@ -209,13 +210,13 @@ func TestRunningOutputNameSuffix(t *testing.T) {
 	}
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
 	ro.AddMetric(testutil.TestMetric(101, "metric1"))
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 1)
 	require.Equal(t, "metric1_suffix", m.Metrics()[0].Name())
 }
@@ -227,18 +228,18 @@ func TestRunningOutputDefault(t *testing.T) {
 	}
 
 	m := &mockOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(t, err)
 
-	for _, metric := range first5 {
-		ro.AddMetric(metric)
+	for _, mt := range first5 {
+		ro.AddMetric(mt)
 	}
-	for _, metric := range next5 {
-		ro.AddMetric(metric)
+	for _, mt := range next5 {
+		ro.AddMetric(mt)
 	}
 	require.Empty(t, m.Metrics())
 
-	err := ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 	require.Len(t, m.Metrics(), 10)
 }
 
@@ -248,27 +249,26 @@ func TestRunningOutputWriteFail(t *testing.T) {
 	}
 
 	m := &mockOutput{batchAcceptSize: -1}
-	ro := NewRunningOutput(m, conf, 4, 12)
+	ro, err := NewRunningOutput(m, conf, 4, 12)
+	require.NoError(t, err)
 
 	// Fill buffer to limit twice
-	for _, metric := range first5 {
-		ro.AddMetric(metric)
+	for _, mt := range first5 {
+		ro.AddMetric(mt)
 	}
-	for _, metric := range next5 {
-		ro.AddMetric(metric)
+	for _, mt := range next5 {
+		ro.AddMetric(mt)
 	}
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	// manual write fails
-	err := ro.Write()
-	require.Error(t, err)
+	require.Error(t, ro.Write())
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	m.batchAcceptSize = 0
-	err = ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 
 	require.Len(t, m.Metrics(), 10)
 }
@@ -280,29 +280,28 @@ func TestRunningOutputWriteFailOrder(t *testing.T) {
 	}
 
 	m := &mockOutput{batchAcceptSize: -1}
-	ro := NewRunningOutput(m, conf, 100, 1000)
+	ro, err := NewRunningOutput(m, conf, 100, 1000)
+	require.NoError(t, err)
 
 	// add 5 metrics
-	for _, metric := range first5 {
-		ro.AddMetric(metric)
+	for _, mt := range first5 {
+		ro.AddMetric(mt)
 	}
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	// Write fails
-	err := ro.Write()
-	require.Error(t, err)
+	require.Error(t, ro.Write())
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	m.batchAcceptSize = 0
 
 	// add 5 more metrics
-	for _, metric := range next5 {
-		ro.AddMetric(metric)
+	for _, mt := range next5 {
+		ro.AddMetric(mt)
 	}
-	err = ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 
 	// Verify that 10 metrics were written
 	require.Len(t, m.Metrics(), 10)
@@ -318,51 +317,47 @@ func TestRunningOutputWriteFailOrder2(t *testing.T) {
 	}
 
 	m := &mockOutput{batchAcceptSize: -1}
-	ro := NewRunningOutput(m, conf, 5, 100)
+	ro, err := NewRunningOutput(m, conf, 5, 100)
+	require.NoError(t, err)
 
 	// add 5 metrics
-	for _, metric := range first5 {
-		ro.AddMetric(metric)
+	for _, mt := range first5 {
+		ro.AddMetric(mt)
 	}
 	// Write fails
-	err := ro.Write()
-	require.Error(t, err)
+	require.Error(t, ro.Write())
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	// add 5 metrics
-	for _, metric := range next5 {
-		ro.AddMetric(metric)
+	for _, mt := range next5 {
+		ro.AddMetric(mt)
 	}
 	// Write fails
-	err = ro.Write()
-	require.Error(t, err)
+	require.Error(t, ro.Write())
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	// add 5 metrics
-	for _, metric := range first5 {
-		ro.AddMetric(metric)
+	for _, mt := range first5 {
+		ro.AddMetric(mt)
 	}
 	// Write fails
-	err = ro.Write()
-	require.Error(t, err)
+	require.Error(t, ro.Write())
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	// add 5 metrics
-	for _, metric := range next5 {
-		ro.AddMetric(metric)
+	for _, mt := range next5 {
+		ro.AddMetric(mt)
 	}
 	// Write fails
-	err = ro.Write()
-	require.Error(t, err)
+	require.Error(t, ro.Write())
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	m.batchAcceptSize = 0
-	err = ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 
 	// Verify that 20 metrics were written
 	require.Len(t, m.Metrics(), 20)
@@ -381,31 +376,28 @@ func TestRunningOutputWriteFailOrder3(t *testing.T) {
 	}
 
 	m := &mockOutput{batchAcceptSize: -1}
-	ro := NewRunningOutput(m, conf, 5, 1000)
+	ro, err := NewRunningOutput(m, conf, 5, 1000)
+	require.NoError(t, err)
 
 	// add 5 metrics
-	for _, metric := range first5 {
-		ro.AddMetric(metric)
+	for _, mt := range first5 {
+		ro.AddMetric(mt)
 	}
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	// Write fails
-	err := ro.Write()
-	require.Error(t, err)
+	require.Error(t, ro.Write())
 	// no successful flush yet
 	require.Empty(t, m.Metrics())
 
 	// add and attempt to write a single metric:
 	ro.AddMetric(next5[0])
-	err = ro.Write()
-	require.Error(t, err)
+	require.Error(t, ro.Write())
 
 	// unset fail and write metrics
 	m.batchAcceptSize = 0
-
-	err = ro.Write()
-	require.NoError(t, err)
+	require.NoError(t, ro.Write())
 
 	// Verify that 6 metrics were written
 	require.Len(t, m.Metrics(), 6)
@@ -439,7 +431,8 @@ func TestRunningOutputBufferFullyDrained(t *testing.T) {
 		},
 	}
 	const batchSize = 5
-	ro := NewRunningOutput(plugin, conf, batchSize, 100)
+	ro, err := NewRunningOutput(plugin, conf, batchSize, 100)
+	require.NoError(t, err)
 
 	// Create a multiple of batch size many metrics beyond the batch size
 	const totalMetrics = 10 * batchSize
@@ -522,7 +515,8 @@ func TestRunningOutputBufferImmediateRestartOnContinuousWrite(t *testing.T) {
 			return nil
 		},
 	}
-	ro := NewRunningOutput(plugin, conf, batchSize, 100)
+	ro, err := NewRunningOutput(plugin, conf, batchSize, 100)
+	require.NoError(t, err)
 
 	// Create a multiple of batch size many metrics beyond the batch size
 	const totalMetrics = 10 * batchSize
@@ -590,7 +584,8 @@ func TestRunningOutputNoRetriggerOnError(t *testing.T) {
 		},
 	}
 	const batchSize = 5
-	ro := NewRunningOutput(plugin, conf, batchSize, 100)
+	ro, err := NewRunningOutput(plugin, conf, batchSize, 100)
+	require.NoError(t, err)
 
 	// Create a multiple of batch size many metrics beyond the batch size
 	const totalMetrics = 10 * batchSize
@@ -660,7 +655,8 @@ func TestRunningOutputNoRetriggerOnSuccessfulPartialWriteError(t *testing.T) {
 		},
 	}
 	const batchSize = 5
-	ro := NewRunningOutput(plugin, conf, batchSize, 100)
+	ro, err := NewRunningOutput(plugin, conf, batchSize, 100)
+	require.NoError(t, err)
 
 	// Create a multiple of batch size many metrics beyond the batch size
 	const batchCount = 10
@@ -728,7 +724,8 @@ func TestRunningOutputNoRetriggerOnUnsuccessfulPartialWriteError(t *testing.T) {
 		},
 	}
 	const batchSize = 5
-	ro := NewRunningOutput(plugin, conf, batchSize, 100)
+	ro, err := NewRunningOutput(plugin, conf, batchSize, 100)
+	require.NoError(t, err)
 
 	// Create a multiple of batch size many metrics beyond the batch size
 	const batchCount = 10
@@ -778,7 +775,7 @@ func TestRunningOutputNoRetriggerOnUnsuccessfulPartialWriteError(t *testing.T) {
 }
 
 func TestRunningOutputInternalMetrics(t *testing.T) {
-	_ = NewRunningOutput(
+	_, err := NewRunningOutput(
 		&mockOutput{},
 		&OutputConfig{
 			Filter: Filter{},
@@ -786,10 +783,12 @@ func TestRunningOutputInternalMetrics(t *testing.T) {
 			Alias:  "test_alias",
 		},
 		5,
-		10)
+		10,
+	)
+	require.NoError(t, err)
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"internal_write",
 			map[string]string{
 				"_id":    "",
@@ -823,7 +822,7 @@ func TestRunningOutputInternalMetrics(t *testing.T) {
 }
 
 func TestRunningOutputStartupBehaviorInvalid(t *testing.T) {
-	ro := NewRunningOutput(
+	ro, err := NewRunningOutput(
 		&mockOutput{},
 		&OutputConfig{
 			Filter:               Filter{},
@@ -833,6 +832,7 @@ func TestRunningOutputStartupBehaviorInvalid(t *testing.T) {
 		},
 		5, 10,
 	)
+	require.NoError(t, err)
 	require.ErrorContains(t, ro.Init(), "invalid 'startup_error_behavior'")
 }
 
@@ -841,7 +841,7 @@ func TestRunningOutputRetryableStartupBehaviorDefault(t *testing.T) {
 		Err:   errors.New("retryable err"),
 		Retry: true,
 	}
-	ro := NewRunningOutput(
+	ro, err := NewRunningOutput(
 		&mockOutput{
 			startupErrorCount: 1,
 			startupError:      serr,
@@ -853,6 +853,7 @@ func TestRunningOutputRetryableStartupBehaviorDefault(t *testing.T) {
 		},
 		5, 10,
 	)
+	require.NoError(t, err)
 	require.NoError(t, ro.Init())
 
 	// If Connect() fails, the agent will stop
@@ -865,7 +866,7 @@ func TestRunningOutputRetryableStartupBehaviorError(t *testing.T) {
 		Err:   errors.New("retryable err"),
 		Retry: true,
 	}
-	ro := NewRunningOutput(
+	ro, err := NewRunningOutput(
 		&mockOutput{
 			startupErrorCount: 1,
 			startupError:      serr,
@@ -878,6 +879,7 @@ func TestRunningOutputRetryableStartupBehaviorError(t *testing.T) {
 		},
 		5, 10,
 	)
+	require.NoError(t, err)
 	require.NoError(t, ro.Init())
 
 	// If Connect() fails, the agent will stop
@@ -894,7 +896,7 @@ func TestRunningOutputRetryableStartupBehaviorRetry(t *testing.T) {
 		startupErrorCount: 2,
 		startupError:      serr,
 	}
-	ro := NewRunningOutput(
+	ro, err := NewRunningOutput(
 		mo,
 		&OutputConfig{
 			Filter:               Filter{},
@@ -904,6 +906,7 @@ func TestRunningOutputRetryableStartupBehaviorRetry(t *testing.T) {
 		},
 		5, 10,
 	)
+	require.NoError(t, err)
 	require.NoError(t, ro.Init())
 
 	// For retry, Connect() should succeed even though there is an error but
@@ -935,7 +938,7 @@ func TestRunningOutputRetryableStartupBehaviorIgnore(t *testing.T) {
 		startupErrorCount: 2,
 		startupError:      serr,
 	}
-	ro := NewRunningOutput(
+	ro, err := NewRunningOutput(
 		mo,
 		&OutputConfig{
 			Filter:               Filter{},
@@ -945,6 +948,7 @@ func TestRunningOutputRetryableStartupBehaviorIgnore(t *testing.T) {
 		},
 		5, 10,
 	)
+	require.NoError(t, err)
 	require.NoError(t, ro.Init())
 
 	// For ignore, Connect() should return a fatal error if connection fails.
@@ -967,7 +971,7 @@ func TestRunningOutputNonRetryableStartupBehaviorDefault(t *testing.T) {
 				startupErrorCount: 2,
 				startupError:      serr,
 			}
-			ro := NewRunningOutput(
+			ro, err := NewRunningOutput(
 				mo,
 				&OutputConfig{
 					Filter:               Filter{},
@@ -977,6 +981,7 @@ func TestRunningOutputNonRetryableStartupBehaviorDefault(t *testing.T) {
 				},
 				5, 10,
 			)
+			require.NoError(t, err)
 			require.NoError(t, ro.Init())
 
 			// Non-retryable error should pass through and in turn the agent
@@ -996,7 +1001,7 @@ func TestRunningOutputUntypedStartupBehaviorIgnore(t *testing.T) {
 				startupErrorCount: 2,
 				startupError:      serr,
 			}
-			ro := NewRunningOutput(
+			ro, err := NewRunningOutput(
 				mo,
 				&OutputConfig{
 					Filter:               Filter{},
@@ -1006,6 +1011,7 @@ func TestRunningOutputUntypedStartupBehaviorIgnore(t *testing.T) {
 				},
 				5, 10,
 			)
+			require.NoError(t, err)
 			require.NoError(t, ro.Init())
 
 			// Untyped error should pass through and in turn the agent will
@@ -1026,7 +1032,7 @@ func TestRunningOutputPartiallyStarted(t *testing.T) {
 		startupErrorCount: 2,
 		startupError:      serr,
 	}
-	ro := NewRunningOutput(
+	ro, err := NewRunningOutput(
 		mo,
 		&OutputConfig{
 			Filter:               Filter{},
@@ -1036,6 +1042,7 @@ func TestRunningOutputPartiallyStarted(t *testing.T) {
 		},
 		5, 10,
 	)
+	require.NoError(t, err)
 	require.NoError(t, ro.Init())
 
 	// For retry, Connect() should succeed even though there is an error but
@@ -1063,17 +1070,18 @@ func TestRunningOutputWritePartialSuccess(t *testing.T) {
 	plugin := &mockOutput{
 		batchAcceptSize: 4,
 	}
-	model := NewRunningOutput(plugin, &OutputConfig{}, 5, 10)
+	model, err := NewRunningOutput(plugin, &OutputConfig{}, 5, 10)
+	require.NoError(t, err)
 	require.NoError(t, model.Init())
 	require.NoError(t, model.Connect())
 	defer model.Close()
 
 	// Fill buffer completely
-	for _, metric := range first5 {
-		model.AddMetric(metric)
+	for _, mt := range first5 {
+		model.AddMetric(mt)
 	}
-	for _, metric := range next5 {
-		model.AddMetric(metric)
+	for _, mt := range next5 {
+		model.AddMetric(mt)
 	}
 
 	// We no not expect any successful flush yet
@@ -1104,17 +1112,18 @@ func TestRunningOutputWritePartialSuccessAndLoss(t *testing.T) {
 		batchAcceptSize:  4,
 		metricFatalIndex: &lost,
 	}
-	model := NewRunningOutput(plugin, &OutputConfig{}, 5, 10)
+	model, err := NewRunningOutput(plugin, &OutputConfig{}, 5, 10)
+	require.NoError(t, err)
 	require.NoError(t, model.Init())
 	require.NoError(t, model.Connect())
 	defer model.Close()
 
 	// Fill buffer completely
-	for _, metric := range first5 {
-		model.AddMetric(metric)
+	for _, mt := range first5 {
+		model.AddMetric(mt)
 	}
-	for _, metric := range next5 {
-		model.AddMetric(metric)
+	for _, mt := range next5 {
+		model.AddMetric(mt)
 	}
 	expected := []telegraf.Metric{
 		/* fatal, */ first5[1], first5[2], first5[3],
@@ -1148,17 +1157,18 @@ func TestRunningOutputWriteBatchPartialSuccess(t *testing.T) {
 	plugin := &mockOutput{
 		batchAcceptSize: 4,
 	}
-	model := NewRunningOutput(plugin, &OutputConfig{}, 5, 10)
+	model, err := NewRunningOutput(plugin, &OutputConfig{}, 5, 10)
+	require.NoError(t, err)
 	require.NoError(t, model.Init())
 	require.NoError(t, model.Connect())
 	defer model.Close()
 
 	// Fill buffer completely
-	for _, metric := range first5 {
-		model.AddMetric(metric)
+	for _, mt := range first5 {
+		model.AddMetric(mt)
 	}
-	for _, metric := range next5 {
-		model.AddMetric(metric)
+	for _, mt := range next5 {
+		model.AddMetric(mt)
 	}
 
 	// We no not expect any successful flush yet
@@ -1189,17 +1199,18 @@ func TestRunningOutputWriteBatchPartialSuccessAndLoss(t *testing.T) {
 		batchAcceptSize:  4,
 		metricFatalIndex: &lost,
 	}
-	model := NewRunningOutput(plugin, &OutputConfig{}, 5, 10)
+	model, err := NewRunningOutput(plugin, &OutputConfig{}, 5, 10)
+	require.NoError(t, err)
 	require.NoError(t, model.Init())
 	require.NoError(t, model.Connect())
 	defer model.Close()
 
 	// Fill buffer completely
-	for _, metric := range first5 {
-		model.AddMetric(metric)
+	for _, mt := range first5 {
+		model.AddMetric(mt)
 	}
-	for _, metric := range next5 {
-		model.AddMetric(metric)
+	for _, mt := range next5 {
+		model.AddMetric(mt)
 	}
 	expected := []telegraf.Metric{
 		/* fatal, */ first5[1], first5[2], first5[3],
@@ -1235,7 +1246,8 @@ func BenchmarkRunningOutputAddWrite(b *testing.B) {
 		Filter: Filter{},
 	}
 	m := &perfOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(b, err)
 
 	for n := 0; n < b.N; n++ {
 		ro.AddMetric(testutil.TestMetric(101, "metric1"))
@@ -1249,7 +1261,8 @@ func BenchmarkRunningOutputAddWriteEvery100(b *testing.B) {
 		Filter: Filter{},
 	}
 	m := &perfOutput{}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(b, err)
 
 	for n := 0; n < b.N; n++ {
 		ro.AddMetric(testutil.TestMetric(101, "metric1"))
@@ -1265,7 +1278,9 @@ func BenchmarkRunningOutputAddFailWrites(b *testing.B) {
 		Filter: Filter{},
 	}
 	m := &perfOutput{failWrite: true}
-	ro := NewRunningOutput(m, conf, 1000, 10000)
+	ro, err := NewRunningOutput(m, conf, 1000, 10000)
+	require.NoError(b, err)
+
 	for n := 0; n < b.N; n++ {
 		ro.AddMetric(testutil.TestMetric(101, "metric1"))
 	}

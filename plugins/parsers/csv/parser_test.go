@@ -514,7 +514,7 @@ func TestParseStream(t *testing.T) {
 	m, err := p.ParseLine(csvBody)
 	require.NoError(t, err)
 	testutil.RequireMetricEqual(t,
-		testutil.MustMetric(
+		metric.New(
 			"csv",
 			map[string]string{},
 			map[string]interface{}{
@@ -544,7 +544,7 @@ func TestParseLineMultiMetricErrorMessage(t *testing.T) {
 	m, err := p.ParseLine(csvOneRow)
 	require.NoError(t, err)
 	testutil.RequireMetricEqual(t,
-		testutil.MustMetric(
+		metric.New(
 			"csv",
 			map[string]string{},
 			map[string]interface{}{
@@ -576,7 +576,7 @@ func TestTimestampUnixFloatPrecision(t *testing.T) {
 	data := `1551129661.95456123352050781250,42`
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"csv",
 			map[string]string{},
 			map[string]interface{}{
@@ -607,7 +607,7 @@ func TestSkipMeasurementColumn(t *testing.T) {
 		1,5,1551129661.954561233`
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"csv",
 			map[string]string{},
 			map[string]interface{}{
@@ -639,7 +639,7 @@ func TestSkipTimestampColumn(t *testing.T) {
 		1,5,1551129661.954561233`
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"csv",
 			map[string]string{},
 			map[string]interface{}{
@@ -694,7 +694,7 @@ func TestEmptyMeasurementName(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric("csv",
+		metric.New("csv",
 			map[string]string{},
 			map[string]interface{}{
 				"b": 2,
@@ -721,7 +721,7 @@ func TestNumericMeasurementName(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric("1",
+		metric.New("1",
 			map[string]string{},
 			map[string]interface{}{
 				"b": 2,
@@ -747,7 +747,7 @@ func TestStaticMeasurementName(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric("csv",
+		metric.New("csv",
 			map[string]string{},
 			map[string]interface{}{
 				"a": 1,
@@ -775,7 +775,7 @@ func TestSkipEmptyStringValue(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric("csv",
+		metric.New("csv",
 			map[string]string{},
 			map[string]interface{}{
 				"a": 1,
@@ -802,7 +802,7 @@ func TestSkipSpecifiedStringValue(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric("csv",
+		metric.New("csv",
 			map[string]string{},
 			map[string]interface{}{
 				"a": 1,
@@ -1608,19 +1608,19 @@ func TestConcurrentParsing(t *testing.T) {
 				}
 
 				// Verify basic metric structure
-				for k, metric := range metrics {
-					if metric.Name() != "benchmark" {
-						t.Logf("goroutine %d iteration %d metric %d: expected name 'benchmark', got '%s'", goroutineID, j, k, metric.Name())
+				for k, mt := range metrics {
+					if mt.Name() != "benchmark" {
+						t.Logf("goroutine %d iteration %d metric %d: expected name 'benchmark', got '%s'", goroutineID, j, k, mt.Name())
 						t.Fail()
 						return
 					}
-					if len(metric.Tags()) != 3 {
-						t.Logf("goroutine %d iteration %d metric %d: expected 3 tags, got %d", goroutineID, j, k, len(metric.Tags()))
+					if len(mt.Tags()) != 3 {
+						t.Logf("goroutine %d iteration %d metric %d: expected 3 tags, got %d", goroutineID, j, k, len(mt.Tags()))
 						t.Fail()
 						return
 					}
-					if len(metric.Fields()) != 1 {
-						t.Logf("goroutine %d iteration %d metric %d: expected 1 field, got %d", goroutineID, j, k, len(metric.Fields()))
+					if len(mt.Fields()) != 1 {
+						t.Logf("goroutine %d iteration %d metric %d: expected 1 field, got %d", goroutineID, j, k, len(mt.Fields()))
 						t.Fail()
 						return
 					}
@@ -1679,9 +1679,9 @@ myhost,python,3.11.5,5,1653643420`
 				}
 
 				// Verify basic metric structure
-				metric := metrics[0]
-				if metric.Name() != "benchmark" {
-					t.Logf("goroutine %d iteration %d: expected name 'benchmark', got '%s'", goroutineID, j, metric.Name())
+				mt := metrics[0]
+				if mt.Name() != "benchmark" {
+					t.Logf("goroutine %d iteration %d: expected name 'benchmark', got '%s'", goroutineID, j, mt.Name())
 					t.Fail()
 					return
 				}
@@ -1750,15 +1750,15 @@ server3,worker,75,1653643440`,
 				}
 
 				// Verify all metrics have the correct name and required fields
-				for k, metric := range metrics {
-					if metric.Name() != "stress_test" {
-						t.Logf("goroutine %d iteration %d metric %d: expected name 'stress_test', got '%s'", goroutineID, j, k, metric.Name())
+				for k, mt := range metrics {
+					if mt.Name() != "stress_test" {
+						t.Logf("goroutine %d iteration %d metric %d: expected name 'stress_test', got '%s'", goroutineID, j, k, mt.Name())
 						t.Fail()
 						return
 					}
 
 					// Should have host and service tags
-					tags := metric.Tags()
+					tags := mt.Tags()
 					if _, exists := tags["host"]; !exists {
 						t.Logf("goroutine %d iteration %d metric %d: missing 'host' tag", goroutineID, j, k)
 						t.Fail()
@@ -1771,7 +1771,7 @@ server3,worker,75,1653643440`,
 					}
 
 					// Should have value field
-					fields := metric.Fields()
+					fields := mt.Fields()
 					if _, exists := fields["value"]; !exists {
 						t.Logf("goroutine %d iteration %d metric %d: missing 'value' field", goroutineID, j, k)
 						t.Fail()
