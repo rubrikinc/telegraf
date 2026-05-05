@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/go-connections/nat"
 	gopcua "github.com/gopcua/opcua"
 	"github.com/gopcua/opcua/ua"
 	"github.com/stretchr/testify/require"
@@ -109,7 +108,7 @@ func TestStartPlugin(t *testing.T) {
 		Image:        "open62541/open62541",
 		ExposedPorts: []string{servicePort},
 		WaitingFor: wait.ForAll(
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 			wait.ForLog("TCP network layer listening on opc.tcp://"),
 		),
 	}
@@ -139,7 +138,7 @@ func TestSubscribeClientIntegration(t *testing.T) {
 		Image:        "open62541/open62541",
 		ExposedPorts: []string{servicePort},
 		WaitingFor: wait.ForAll(
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 			wait.ForLog("TCP network layer listening on opc.tcp://"),
 		),
 	}
@@ -253,7 +252,7 @@ func TestSubscribeClientIntegrationAdditionalFields(t *testing.T) {
 		Image:        "open62541/open62541",
 		ExposedPorts: []string{servicePort},
 		WaitingFor: wait.ForAll(
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 			wait.ForLog("TCP network layer listening on opc.tcp://"),
 		),
 	}
@@ -382,6 +381,62 @@ func TestSubscribeClientIntegrationAdditionalFields(t *testing.T) {
 			t.Errorf("Tags %s are remaining without a received value", sb.String())
 			return
 		}
+	}
+}
+
+func TestSkipFailedMonitoredItemsIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	container := testutil.Container{
+		Image:        "open62541/open62541",
+		ExposedPorts: []string{servicePort},
+		WaitingFor: wait.ForAll(
+			wait.ForListeningPort(servicePort),
+			wait.ForLog("TCP network layer listening on opc.tcp://"),
+		),
+	}
+	require.NoError(t, container.Start(), "failed to start container")
+	defer container.Terminate()
+
+	subscribeConfig := subscribeClientConfig{
+		InputClientConfig: input.InputClientConfig{
+			OpcUAClientConfig: opcua.OpcUAClientConfig{
+				Endpoint:       fmt.Sprintf("opc.tcp://%s:%s", container.Address, container.Ports[servicePort]),
+				SecurityPolicy: "None",
+				SecurityMode:   "None",
+				AuthMethod:     "Anonymous",
+				ConnectTimeout: config.Duration(10 * time.Second),
+				RequestTimeout: config.Duration(1 * time.Second),
+			},
+			MetricName: "testing",
+			RootNodes: []input.NodeSettings{
+				{FieldName: "ProductName", Namespace: "0", IdentifierType: "i", Identifier: "2261"},
+				{FieldName: "NonExistent", Namespace: "99", IdentifierType: "i", Identifier: "99999"},
+			},
+		},
+	}
+
+	o, err := subscribeConfig.createSubscribeClient(testutil.Logger{})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return o.SetupOptions() == nil
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.NoError(t, o.connect())
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	res, err := o.startMonitoring(ctx)
+	require.NoError(t, err)
+
+	select {
+	case m := <-res:
+		require.Contains(t, m.Fields(), "ProductName")
+	case <-ctx.Done():
+		t.Fatal("Timed out waiting for metric from valid node")
 	}
 }
 
@@ -594,7 +649,7 @@ func TestSubscribeClientConfigInvalidTrigger(t *testing.T) {
 	})
 
 	_, err := subscribeConfig.createSubscribeClient(testutil.Logger{})
-	require.ErrorContains(t, err, "trigger 'not_valid' not supported, node 'ns=3;i=1'")
+	require.ErrorContains(t, err, "node 'ns=3;i=1': trigger 'not_valid' not supported")
 }
 
 func TestSubscribeClientConfigMissingTrigger(t *testing.T) {
@@ -628,7 +683,7 @@ func TestSubscribeClientConfigMissingTrigger(t *testing.T) {
 	})
 
 	_, err := subscribeConfig.createSubscribeClient(testutil.Logger{})
-	require.ErrorContains(t, err, "trigger '' not supported, node 'ns=3;i=1'")
+	require.ErrorContains(t, err, "node 'ns=3;i=1': trigger '' not supported")
 }
 
 func TestSubscribeClientConfigInvalidDeadbandType(t *testing.T) {
@@ -663,7 +718,7 @@ func TestSubscribeClientConfigInvalidDeadbandType(t *testing.T) {
 	})
 
 	_, err := subscribeConfig.createSubscribeClient(testutil.Logger{})
-	require.ErrorContains(t, err, "deadband_type 'not_valid' not supported, node 'ns=3;i=1'")
+	require.ErrorContains(t, err, "node 'ns=3;i=1': deadband_type 'not_valid' not supported")
 }
 
 func TestSubscribeClientConfigMissingDeadbandType(t *testing.T) {
@@ -697,7 +752,7 @@ func TestSubscribeClientConfigMissingDeadbandType(t *testing.T) {
 	})
 
 	_, err := subscribeConfig.createSubscribeClient(testutil.Logger{})
-	require.ErrorContains(t, err, "deadband_type '' not supported, node 'ns=3;i=1'")
+	require.ErrorContains(t, err, "node 'ns=3;i=1': deadband_type '' not supported")
 }
 
 func TestSubscribeClientConfigInvalidDeadbandValue(t *testing.T) {
@@ -734,7 +789,7 @@ func TestSubscribeClientConfigInvalidDeadbandValue(t *testing.T) {
 	})
 
 	_, err := subscribeConfig.createSubscribeClient(testutil.Logger{})
-	require.ErrorContains(t, err, "negative deadband_value not supported, node 'ns=3;i=1'")
+	require.ErrorContains(t, err, "node 'ns=3;i=1': negative deadband_value not supported")
 }
 
 func TestSubscribeClientConfigMissingDeadbandValue(t *testing.T) {
@@ -769,7 +824,7 @@ func TestSubscribeClientConfigMissingDeadbandValue(t *testing.T) {
 	})
 
 	_, err := subscribeConfig.createSubscribeClient(testutil.Logger{})
-	require.ErrorContains(t, err, "deadband_value was not set, node 'ns=3;i=1'")
+	require.ErrorContains(t, err, "node 'ns=3;i=1': deadband_value was not set")
 }
 
 func TestSubscribeClientConfigValidMonitoringParams(t *testing.T) {
