@@ -2,6 +2,8 @@ module github.com/influxdata/telegraf
 
 go 1.26
 
+toolchain go1.26.2
+
 godebug x509negativeserial=1
 
 require (
