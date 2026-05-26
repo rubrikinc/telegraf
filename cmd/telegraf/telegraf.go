@@ -188,7 +188,7 @@ func (t *Telegraf) reloadLoop() error {
 				if sig == syscall.SIGHUP {
 					log.Println("I! Reloading Telegraf config")
 					// May need to update the list of known config files
-					// if a delete or create occured. That way on the reload
+					// if a delete or create occurred. That way on the reload
 					// we ensure we watch the correct files.
 					if err := t.getConfigFiles(); err != nil {
 						log.Println("E! Error loading config files: ", err)
@@ -390,6 +390,9 @@ func (*Telegraf) watchRemoteConfigs(ctx context.Context, signals chan os.Signal,
 }
 
 func (t *Telegraf) loadConfiguration() (*config.Config, error) {
+	// Make sure secrets are cleared
+	config.ResetSecrets()
+
 	// If no other options are specified, load the config file and run.
 	c := config.NewConfig()
 	c.Agent.Quiet = t.quiet
@@ -471,7 +474,7 @@ func (t *Telegraf) runAgent(ctx context.Context, reloadConfig bool) error {
 	}
 
 	if err := logger.SetupLogging(logConfig); err != nil {
-		return err
+		return fmt.Errorf("setting up logging failed: %w", err)
 	}
 
 	log.Printf("I! Starting Telegraf %s%s brought to you by InfluxData the makers of InfluxDB", internal.Version, internal.Customized)
