@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -23,6 +24,23 @@ import (
 	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/plugins/outputs"
 )
+
+// telegrafSlogHandler is a slog.Handler that forwards records to telegraf's
+// logger at Trace level. Replaces the rclone v1.69 fs.LogOutput hook, which
+// was removed when rclone migrated from logrus to log/slog (rclone v1.70+).
+type telegrafSlogHandler struct {
+	log telegraf.Logger
+}
+
+func (h *telegrafSlogHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= slog.LevelWarn
+}
+func (h *telegrafSlogHandler) Handle(_ context.Context, r slog.Record) error {
+	h.log.Tracef("[%s] %s", r.Level.String(), r.Message)
+	return nil
+}
+func (h *telegrafSlogHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *telegrafSlogHandler) WithGroup(_ string) slog.Handler      { return h }
 
 //go:embed sample.conf
 var sampleConfig string
@@ -84,9 +102,7 @@ func (f *File) Init() error {
 		f.vfsopts.CacheMaxSize = fs.SizeSuffix(f.MaxCacheSize)
 	}
 
-	fs.LogOutput = func(level fs.LogLevel, text string) {
-		f.Log.Tracef("[%s] %s", level.String(), text)
-	}
+	slog.SetDefault(slog.New(&telegrafSlogHandler{log: f.Log}))
 
 	// Setup custom template functions
 	funcs := template.FuncMap{"now": time.Now}
