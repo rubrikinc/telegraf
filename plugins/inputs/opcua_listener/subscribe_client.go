@@ -42,12 +42,13 @@ func checkDataChangeFilterParameters(params *input.DataChangeFilter) error {
 		params.Trigger != input.StatusValue &&
 		params.Trigger != input.StatusValueTimestamp:
 		return fmt.Errorf("trigger '%s' not supported", params.Trigger)
-	case params.DeadbandType != input.Absolute &&
+	case params.DeadbandType != input.None &&
+		params.DeadbandType != input.Absolute &&
 		params.DeadbandType != input.Percent:
 		return fmt.Errorf("deadband_type '%s' not supported", params.DeadbandType)
-	case params.DeadbandValue == nil:
+	case params.DeadbandType != input.None && params.DeadbandValue == nil:
 		return errors.New("deadband_value was not set")
-	case *params.DeadbandValue < 0:
+	case params.DeadbandValue != nil && *params.DeadbandValue < 0:
 		return errors.New("negative deadband_value not supported")
 	default:
 		return nil
@@ -70,11 +71,17 @@ func assignConfigValuesToRequest(req *ua.MonitoredItemCreateRequest, monParams *
 			return fmt.Errorf("node '%s': %w", req.ItemToMonitor.NodeID, err)
 		}
 
+		var deadbandValue float64
+
+		if monParams.DataChangeFilter.DeadbandValue != nil {
+			deadbandValue = *monParams.DataChangeFilter.DeadbandValue
+		}
+
 		req.RequestedParameters.Filter = ua.NewExtensionObject(
 			&ua.DataChangeFilter{
 				Trigger:       ua.DataChangeTriggerFromString(string(monParams.DataChangeFilter.Trigger)),
 				DeadbandType:  uint32(ua.DeadbandTypeFromString(string(monParams.DataChangeFilter.DeadbandType))),
-				DeadbandValue: *monParams.DataChangeFilter.DeadbandValue,
+				DeadbandValue: deadbandValue,
 			},
 		)
 	}
@@ -88,13 +95,13 @@ func (sc *subscribeClientConfig) createSubscribeClient(log telegraf.Logger) (*su
 		return nil, err
 	}
 
-	// Initialize node IDs (namespace URI resolution will happen during connect if needed)
-	if err := client.InitNodeIDs(); err != nil {
-		return nil, err
-	}
-
-	if err := client.InitEventNodeIDs(); err != nil {
-		return nil, err
+	// Validate monitoring parameters at config time (no server connection needed)
+	for _, node := range client.NodeMetricMapping {
+		if node.Tag.MonitoringParams.DataChangeFilter != nil {
+			if err := checkDataChangeFilterParameters(node.Tag.MonitoringParams.DataChangeFilter); err != nil {
+				return nil, fmt.Errorf("node '%s': %w", node.Tag.NodeID(), err)
+			}
+		}
 	}
 
 	processingCtx, processingCancel := context.WithCancel(context.Background())
@@ -102,8 +109,8 @@ func (sc *subscribeClientConfig) createSubscribeClient(log telegraf.Logger) (*su
 	subClient := &subscribeClient{
 		OpcUAInputClient:   client,
 		Config:             *sc,
-		monitoredItemsReqs: make([]*ua.MonitoredItemCreateRequest, len(client.NodeIDs)),
-		eventItemsReqs:     make([]*ua.MonitoredItemCreateRequest, len(client.EventNodeMetricMapping)),
+		monitoredItemsReqs: make([]*ua.MonitoredItemCreateRequest, 0, len(client.NodeMetricMapping)),
+		eventItemsReqs:     make([]*ua.MonitoredItemCreateRequest, 0, len(client.EventNodeMetricMapping)),
 		// 100 was chosen to make sure that the channels will not block when multiple changes come in at the same time.
 		// The channel size should be increased if reports come in on Telegraf blocking when many changes come in at
 		// the same time. It could be made dependent on the number of nodes subscribed to and the subscription interval.
@@ -113,33 +120,6 @@ func (sc *subscribeClientConfig) createSubscribeClient(log telegraf.Logger) (*su
 		cancel:            processingCancel,
 	}
 
-	log.Debugf("Creating monitored items")
-	for i, nodeID := range client.NodeIDs {
-		// The node id index (i) is used as the handle for the monitored item
-		req := opcua.NewMonitoredItemCreateRequestWithDefaults(nodeID, ua.AttributeIDValue, uint32(i))
-		if err := assignConfigValuesToRequest(req, &client.NodeMetricMapping[i].Tag.MonitoringParams); err != nil {
-			return nil, fmt.Errorf("assigning monitoring params failed: %w", err)
-		}
-		subClient.monitoredItemsReqs[i] = req
-	}
-
-	log.Debugf("Creating event streaming items")
-	for i, node := range client.EventNodeMetricMapping {
-		req := opcua.NewMonitoredItemCreateRequestWithDefaults(node.NodeID, ua.AttributeIDEventNotifier, uint32(i))
-		if node.SamplingInterval != nil {
-			req.RequestedParameters.SamplingInterval = float64(time.Duration(*node.SamplingInterval) / time.Millisecond)
-		}
-		if node.QueueSize != nil {
-			req.RequestedParameters.QueueSize = *node.QueueSize
-		}
-
-		filterExtObj, err := node.CreateEventFilter()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create event filter: %w", err)
-		}
-		req.RequestedParameters.Filter = filterExtObj
-		subClient.eventItemsReqs[i] = req
-	}
 	return subClient, nil
 }
 
@@ -154,6 +134,56 @@ func (o *subscribeClient) connect() error {
 	if err := o.OpcUAClient.UpdateNamespaceArray(o.ctx); err != nil {
 		o.Log.Warnf("Failed to fetch namespace array: %v", err)
 		// Continue anyway - this is only needed if using namespace URIs
+	}
+
+	// Browse-based discovery runs on every connect so server-side schema
+	// changes (added or removed nodes, renumbered namespaces) are picked up
+	// on reconnect. DiscoverNodes replaces the previously discovered groups
+	// and InitNodeMetricMapping rebuilds the mapping from scratch.
+	if len(o.Config.Browse.Paths) > 0 {
+		if err := o.OpcUAInputClient.DiscoverNodes(o.ctx); err != nil {
+			return fmt.Errorf("browse discovery failed: %w", err)
+		}
+		if err := o.OpcUAInputClient.InitNodeMetricMapping(); err != nil {
+			return fmt.Errorf("initializing node metric mapping failed: %w", err)
+		}
+	}
+
+	// Initialize node IDs after connection so namespace URIs can be resolved
+	if err := o.OpcUAInputClient.InitNodeIDs(); err != nil {
+		return fmt.Errorf("initializing node IDs failed: %w", err)
+	}
+	if err := o.OpcUAInputClient.InitEventNodeIDs(); err != nil {
+		return fmt.Errorf("initializing event node IDs failed: %w", err)
+	}
+
+	o.Log.Debugf("Creating monitored items")
+	o.monitoredItemsReqs = make([]*ua.MonitoredItemCreateRequest, 0, len(o.NodeIDs))
+	for i, nodeID := range o.NodeIDs {
+		req := opcua.NewMonitoredItemCreateRequestWithDefaults(nodeID, ua.AttributeIDValue, uint32(i))
+		if err := assignConfigValuesToRequest(req, &o.NodeMetricMapping[i].Tag.MonitoringParams); err != nil {
+			return fmt.Errorf("assigning monitoring params failed: %w", err)
+		}
+		o.monitoredItemsReqs = append(o.monitoredItemsReqs, req)
+	}
+
+	o.Log.Debugf("Creating event streaming items")
+	o.eventItemsReqs = make([]*ua.MonitoredItemCreateRequest, 0, len(o.EventNodeMetricMapping))
+	for i, node := range o.EventNodeMetricMapping {
+		req := opcua.NewMonitoredItemCreateRequestWithDefaults(node.NodeID, ua.AttributeIDEventNotifier, uint32(i))
+		if node.SamplingInterval != nil {
+			req.RequestedParameters.SamplingInterval = float64(time.Duration(*node.SamplingInterval) / time.Millisecond)
+		}
+		if node.QueueSize != nil {
+			req.RequestedParameters.QueueSize = *node.QueueSize
+		}
+
+		filterExtObj, err := node.CreateEventFilter()
+		if err != nil {
+			return fmt.Errorf("creating event filter failed: %w", err)
+		}
+		req.RequestedParameters.Filter = filterExtObj
+		o.eventItemsReqs = append(o.eventItemsReqs, req)
 	}
 
 	o.Log.Debugf("Creating OPC UA subscription")
