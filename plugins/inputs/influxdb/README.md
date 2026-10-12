@@ -18,6 +18,7 @@ InfluxDB-formatted endpoints.
 > ```
 
 ⭐ Telegraf v0.2.5
+🏷️ datastores
 🏷️ datastore
 💻 all
 

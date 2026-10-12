@@ -9,6 +9,7 @@ set to one of `ns`, `us`, `ms`, `s`.  All other parameters are ignored and defer
 to the output plugins configuration.
 
 ⭐ Telegraf v1.16.0
+🏷️ datastores
 🏷️ datastore
 💻 all
 

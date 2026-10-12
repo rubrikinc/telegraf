@@ -4,6 +4,8 @@ This plugin gathers data from an [OPC UA][opcua] server by subscribing to the
 configured nodes.
 
 ⭐ Telegraf v1.16.0
+🏷️ network
+💻 linux, windows
 🏷️ iot
 💻 all
 
@@ -338,6 +340,7 @@ produces a metric like this:
 opcua,id=ns\=3;s\=Temperature temp=79.0,Quality="OK (0x0)",DataType="Float" 1597820490000000000
 ```
 
+If the value is an array, each element is unpacked into a field  
 If the value is an array, each element is unpacked into a field
 using indexed keys. For example:
 

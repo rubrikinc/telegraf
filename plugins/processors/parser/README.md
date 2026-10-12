@@ -45,6 +45,8 @@ plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ##    false, all metrics are merged into the original metric
   ##    NOTE: Existing field or tag values will be overridden.
   ##  - override-with-timestamp: same as "override", but the timestamp is set
+  ##    based on the new metrics if present.
+  # merge = ""
   ##    based on the new metrics if present
   ##  - parent: emit one metric per newly parsed metric with each newly parsed
   ##    metric is merged individually into the parent metric keeping the parent

@@ -10,6 +10,7 @@ partition key is specified the batches will be automatically load-balanced
 (round-robin) across all the Event Hub partitions.
 
 ⭐ Telegraf v1.21.0
+🏷️ cloud,datastores
 🏷️ cloud,datastore
 💻 all
 
