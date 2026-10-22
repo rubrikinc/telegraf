@@ -2,7 +2,7 @@ module github.com/influxdata/telegraf
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 godebug x509negativeserial=1
 
