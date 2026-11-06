@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -136,7 +138,7 @@ func (logstash *Logstash) Gather(accumulator telegraf.Accumulator) error {
 		logstash.client = client
 	}
 
-	if choice.Contains("jvm", logstash.Collect) {
+	if slices.Contains(logstash.Collect, "jvm") {
 		jvmURL, err := url.Parse(logstash.URL + jvmStatsNode)
 		if err != nil {
 			return err
@@ -146,7 +148,7 @@ func (logstash *Logstash) Gather(accumulator telegraf.Accumulator) error {
 		}
 	}
 
-	if choice.Contains("process", logstash.Collect) {
+	if slices.Contains(logstash.Collect, "process") {
 		processURL, err := url.Parse(logstash.URL + processStatsNode)
 		if err != nil {
 			return err
@@ -156,7 +158,7 @@ func (logstash *Logstash) Gather(accumulator telegraf.Accumulator) error {
 		}
 	}
 
-	if choice.Contains("pipelines", logstash.Collect) {
+	if slices.Contains(logstash.Collect, "pipelines") {
 		if logstash.SinglePipeline {
 			pipelineURL, err := url.Parse(logstash.URL + pipelineStatsNode)
 			if err != nil {
@@ -290,9 +292,7 @@ func gatherPluginsStats(plugins []plugin, pluginType string, tags map[string]str
 			"plugin_id":   plugin.ID,
 			"plugin_type": pluginType,
 		}
-		for tag, value := range tags {
-			pluginTags[tag] = value
-		}
+		maps.Copy(pluginTags, tags)
 		flattener := parsers_json.JSONFlattener{}
 		err := flattener.FlattenJSON("", plugin.Events)
 		if err != nil {
@@ -369,9 +369,7 @@ func gatherQueueStats(queue pipelineQueue, tags map[string]string, acc telegraf.
 	queueTags := map[string]string{
 		"queue_type": queue.Type,
 	}
-	for tag, value := range tags {
-		queueTags[tag] = value
-	}
+	maps.Copy(queueTags, tags)
 
 	events := queue.Events
 	if queue.EventsCount != nil {
@@ -392,9 +390,7 @@ func gatherQueueStats(queue pipelineQueue, tags map[string]string, acc telegraf.
 		if err != nil {
 			return err
 		}
-		for field, value := range flattener.Fields {
-			queueFields[field] = value
-		}
+		maps.Copy(queueFields, flattener.Fields)
 
 		if queue.MaxQueueSizeInBytes != nil {
 			queueFields["max_queue_size_in_bytes"] = *queue.MaxQueueSizeInBytes
@@ -506,9 +502,7 @@ func newLogstash() *Logstash {
 		URL:     "http://127.0.0.1:9600",
 		Collect: []string{"pipelines", "process", "jvm"},
 		Headers: make(map[string]string),
-		HTTPClientConfig: common_http.HTTPClientConfig{
-			Timeout: config.Duration(5 * time.Second),
-		},
+		Timeout: config.Duration(5 * time.Second),
 	}
 }
 

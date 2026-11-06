@@ -53,6 +53,10 @@ func (*testSNMPConnection) Reconnect() error {
 	return errors.New("not implemented")
 }
 
+func (*testSNMPConnection) Close() error {
+	return errors.New("not implemented")
+}
+
 func TestRegistry(t *testing.T) {
 	require.Contains(t, processors.Processors, "snmp_lookup")
 	require.IsType(t, &SNMPLookup{}, processors.Processors["snmp_lookup"]())
@@ -88,9 +92,7 @@ func TestInit(t *testing.T) {
 		{
 			name: "wrong SNMP client config",
 			plugin: &SNMPLookup{
-				ClientConfig: snmp.ClientConfig{
-					Version: 99,
-				},
+				Version: 99,
 			},
 			expected: "parsing SNMP client config: invalid version",
 		},

@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"maps"
 	"net/url"
 	"os"
 	"sort"
@@ -123,16 +124,14 @@ func (d *DCOS) gatherNode(ctx context.Context, acc telegraf.Accumulator, cluster
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		m, err := d.client.getNodeMetrics(ctx, node)
 		if err != nil {
 			acc.AddError(err)
 			return
 		}
 		addNodeMetrics(acc, cluster, m)
-	}()
+	})
 
 	d.gatherContainers(ctx, acc, cluster, node)
 	wg.Wait()
@@ -233,9 +232,7 @@ func createPoints(m *metrics) []*point {
 				p.tags[k] = v
 			case map[string]string:
 				if k == "labels" {
-					for k, v := range v {
-						p.labels[k] = v
-					}
+					maps.Copy(p.labels, v)
 				}
 			}
 		}
@@ -258,9 +255,7 @@ func addMetrics(acc telegraf.Accumulator, cluster, mname string, m *metrics, tag
 				tags[tagkey] = v
 			}
 		}
-		for k, v := range p.labels {
-			tags[k] = v
-		}
+		maps.Copy(tags, p.labels)
 
 		acc.AddFields(mname, p.fields, tags, tm)
 	}

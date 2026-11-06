@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"regexp"
 	"sort"
@@ -288,13 +289,11 @@ func (s *Statsd) Start(ac telegraf.Accumulator) error {
 		s.Log.Infof("UDP listening on %q", conn.LocalAddr().String())
 		s.UDPlistener = conn
 
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := s.udpListen(conn); err != nil {
 				ac.AddError(err)
 			}
-		}()
+		})
 	} else {
 		address, err := net.ResolveTCPAddr("tcp", s.ServiceAddress)
 		if err != nil {
@@ -308,24 +307,20 @@ func (s *Statsd) Start(ac telegraf.Accumulator) error {
 		s.Log.Infof("TCP listening on %q", listener.Addr().String())
 		s.TCPlistener = listener
 
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := s.tcpListen(listener); err != nil {
 				ac.AddError(err)
 			}
-		}()
+		})
 	}
 
 	for i := 1; i <= s.NumberWorkerThreads; i++ {
 		// Start the line parser
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := s.parser(); err != nil {
 				ac.AddError(err)
 			}
-		}()
+		})
 	}
 	s.Log.Infof("Started the statsd service on %q", s.ServiceAddress)
 	return nil
@@ -752,9 +747,7 @@ func (s *Statsd) parseStatsdLine(p *graphite.Parser, line string) error {
 			m.tags["metric_type"] = "distribution"
 		}
 		if len(lineTags) > 0 {
-			for k, v := range lineTags {
-				m.tags[k] = v
-			}
+			maps.Copy(m.tags, lineTags)
 		}
 
 		// Make a unique key for the measurement name/tags

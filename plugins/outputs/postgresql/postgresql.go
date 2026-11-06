@@ -259,8 +259,7 @@ func (p *Postgresql) Write(metrics []telegraf.Metric) error {
 		err = p.writeSequential(tableSources)
 	}
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 			// PgError doesn't include .Detail in Error(), so we concat it onto .Message.
 			if pgErr.Detail != "" {
 				pgErr.Message += "; " + pgErr.Detail
@@ -429,6 +428,9 @@ func (p *Postgresql) writeRetry(ctx context.Context, tableSource *TableSource) e
 
 // Writes the metrics from a specified measure. All the provided metrics must belong to the same measurement.
 func (p *Postgresql) writeMetricsFromMeasure(ctx context.Context, db dbh, tableSource *TableSource) error {
+	if tableSource.Name() == "" {
+		return errors.New("empty measurement name")
+	}
 	err := p.tableManager.MatchSource(ctx, db, tableSource)
 	if err != nil {
 		return err

@@ -15,13 +15,12 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 	"unicode"
-
-	"github.com/influxdata/telegraf/internal/choice"
 )
 
 const alphanum string = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -199,8 +198,7 @@ func AlignTime(tm time.Time, interval time.Duration) time.Time {
 // and returns the exit status and true
 // if error is not exit status, will return 0 and false
 func ExitStatus(err error) (int, bool) {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 			return status.ExitStatus(), true
 		}
@@ -366,7 +364,7 @@ func sanitizeTimestamp(timestamp string, decimalSeparator []string) string {
 	// Remove thousand-separators that are not used for decimal separation
 	sanitized := timestamp
 	for _, s := range []string{" ", ",", "."} {
-		if !choice.Contains(s, decimalSeparator) {
+		if !slices.Contains(decimalSeparator, s) {
 			sanitized = strings.ReplaceAll(sanitized, s, "")
 		}
 	}

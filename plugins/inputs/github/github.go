@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -96,9 +97,7 @@ func (g *GitHub) Gather(acc telegraf.Accumulator) error {
 						continue
 					}
 
-					for k, v := range addFields {
-						fields[k] = v
-					}
+					maps.Copy(fields, addFields)
 				default:
 					acc.AddError(fmt.Errorf("unknown additional field %q", field))
 					continue
@@ -146,11 +145,10 @@ func (g *GitHub) newGithubClient(httpClient *http.Client) (*github.Client, error
 }
 
 func (g *GitHub) handleRateLimit(response *github.Response, err error) {
-	var rlErr *github.RateLimitError
 	if err == nil {
 		g.rateLimit.Set(int64(response.Rate.Limit))
 		g.rateRemaining.Set(int64(response.Rate.Remaining))
-	} else if errors.As(err, &rlErr) {
+	} else if _, ok := errors.AsType[*github.RateLimitError](err); ok {
 		g.rateLimitErrors.Incr(1)
 	}
 }
@@ -197,10 +195,8 @@ func getFields(repositoryInfo *github.Repository) map[string]any {
 func (g *GitHub) getPullRequestFields(ctx context.Context, owner, repo string) (map[string]any, error) {
 	options := github.SearchOptions{
 		TextMatch: false,
-		ListOptions: github.ListOptions{
-			PerPage: 100,
-			Page:    1,
-		},
+		PerPage:   100,
+		Page:      1,
 	}
 
 	classes := []string{"open", "closed"}

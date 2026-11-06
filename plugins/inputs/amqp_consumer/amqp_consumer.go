@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand"
 	"strings"
 	"sync"
@@ -146,9 +147,7 @@ func (a *AMQPConsumer) Start(acc telegraf.Accumulator) error {
 		a.process(processingCtx, msgs, acc)
 	}()
 
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
+	a.wg.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -188,7 +187,7 @@ func (a *AMQPConsumer) Start(acc telegraf.Accumulator) error {
 			}
 			a.Log.Info("Successfully reconnected")
 		}
-	}()
+	})
 
 	return nil
 }
@@ -399,10 +398,7 @@ func (a *AMQPConsumer) declareQueue(channel *amqp.Channel) (*amqp.Queue, error) 
 		queueDurable = false
 	}
 
-	queueArgs := make(amqp.Table, len(a.QueueArguments))
-	for k, v := range a.QueueArguments {
-		queueArgs[k] = v
-	}
+	queueArgs := amqp.Table(maps.Clone(a.QueueArguments))
 
 	if a.QueuePassive {
 		queue, err = channel.QueueDeclarePassive(

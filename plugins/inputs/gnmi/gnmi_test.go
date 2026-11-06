@@ -54,13 +54,11 @@ func TestWaitError(t *testing.T) {
 	require.NoError(t, plugin.Start(&acc))
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			t.Error(err)
 		}
-	}()
+	})
 
 	acc.WaitError(1)
 	plugin.Stop()
@@ -114,13 +112,11 @@ func TestUsernamePassword(t *testing.T) {
 	require.NoError(t, plugin.Start(&acc))
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			t.Error(err)
 		}
-	}()
+	})
 
 	acc.WaitError(1)
 	plugin.Stop()
@@ -352,13 +348,11 @@ func TestNotification(t *testing.T) {
 				Redial:   config.Duration(1 * time.Second),
 				TagSubscriptions: []common_gnmi.TagSubscription{
 					{
-						Subscription: common_gnmi.Subscription{
-							Name:             "oc-neigh-desc",
-							Origin:           "openconfig",
-							Path:             "/network-instances/network-instance/protocols/protocol/bgp/neighbors/neighbor/state/description",
-							SubscriptionMode: "on_change",
-						},
-						Elements: []string{"network-instance", "protocol", "neighbor"},
+						Name:             "oc-neigh-desc",
+						Origin:           "openconfig",
+						Path:             "/network-instances/network-instance/protocols/protocol/bgp/neighbors/neighbor/state/description",
+						SubscriptionMode: "on_change",
+						Elements:         []string{"network-instance", "protocol", "neighbor"},
 					},
 				},
 				Subscriptions: []common_gnmi.Subscription{
@@ -754,11 +748,9 @@ func TestNotification(t *testing.T) {
 		{
 			name: "Juniper Extension",
 			plugin: &GNMI{
-				Log:      testutil.Logger{},
-				Encoding: "proto",
-				HandlerConfig: common_gnmi.HandlerConfig{
-					VendorExt: []string{"juniper_header"},
-				},
+				Log:                           testutil.Logger{},
+				Encoding:                      "proto",
+				VendorExt:                     []string{"juniper_header"},
 				Redial:                        config.Duration(1 * time.Second),
 				EnforceFirstNamespaceAsOrigin: true,
 				Subscriptions: []common_gnmi.Subscription{
@@ -857,13 +849,11 @@ func TestNotification(t *testing.T) {
 			require.NoError(t, tt.plugin.Start(&acc))
 
 			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				if err := grpcServer.Serve(listener); err != nil {
 					t.Error(err)
 				}
-			}()
+			})
 
 			acc.Wait(len(tt.expected))
 			tt.plugin.Stop()
@@ -899,13 +889,11 @@ func TestRedial(t *testing.T) {
 	gnmi.RegisterGNMIServer(grpcServer, gnmiServer)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			t.Error(err)
 		}
-	}()
+	})
 
 	var acc testutil.Accumulator
 	require.NoError(t, plugin.Init())
@@ -932,13 +920,11 @@ func TestRedial(t *testing.T) {
 	}
 	gnmi.RegisterGNMIServer(grpcServer, gnmiServer)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			t.Error(err)
 		}
-	}()
+	})
 
 	acc.Wait(4)
 	plugin.Stop()
@@ -1036,13 +1022,11 @@ func TestCases(t *testing.T) {
 
 			// Start the server
 			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				if err := grpcServer.Serve(listener); err != nil {
 					t.Error(err)
 				}
-			}()
+			})
 
 			var acc testutil.Accumulator
 			require.NoError(t, plugin.Init())

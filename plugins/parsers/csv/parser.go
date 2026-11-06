@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,7 +19,6 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/internal"
-	"github.com/influxdata/telegraf/internal/choice"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/parsers"
 )
@@ -178,7 +179,7 @@ func (p *Parser) Init() error {
 	if p.ResetMode == "" {
 		p.ResetMode = "none"
 	}
-	if !choice.Contains(p.ResetMode, []string{"none", "always"}) {
+	if !slices.Contains([]string{"none", "always"}, p.ResetMode) {
 		return fmt.Errorf("unknown reset mode %q", p.ResetMode)
 	}
 	p.Reset()
@@ -286,9 +287,7 @@ func parseCSV(p *Parser, r io.Reader) ([]telegraf.Metric, error) {
 		}
 		p.remainingMetadataRows--
 		m := p.parseMetadataRow(line)
-		for k, v := range m {
-			p.metadataTags[k] = v
-		}
+		maps.Copy(p.metadataTags, m)
 	}
 	csvReader := p.compile(lineReader)
 	// if there is a header, and we did not get DataColumns
@@ -350,14 +349,10 @@ func (p *Parser) parseRecord(record []string) (telegraf.Metric, error) {
 
 	if p.TagOverwrite {
 		// add default tags
-		for k, v := range p.DefaultTags {
-			tags[k] = v
-		}
+		maps.Copy(tags, p.DefaultTags)
 
 		// add metadata tags
-		for k, v := range p.metadataTags {
-			tags[k] = v
-		}
+		maps.Copy(tags, p.metadataTags)
 	}
 
 	// skip columns in record
@@ -439,14 +434,10 @@ outer:
 
 	if !p.TagOverwrite {
 		// add metadata tags
-		for k, v := range p.metadataTags {
-			tags[k] = v
-		}
+		maps.Copy(tags, p.metadataTags)
 
 		// add default tags
-		for k, v := range p.DefaultTags {
-			tags[k] = v
-		}
+		maps.Copy(tags, p.DefaultTags)
 	}
 
 	// will default to plugin name

@@ -68,12 +68,6 @@ func (c *shardConsumer) consume(ctx context.Context, shard string) ([]types.Chil
 		}
 		c.log.Tracef("read %d records for shard %s...", len(resp.Records), shard)
 
-		// Check if we fully read the shard
-		if resp.NextShardIterator == nil {
-			return resp.ChildShards, nil
-		}
-		iter = resp.NextShardIterator
-
 		// Process the records and keep track of the last sequence number
 		// consumed for recreating the iterator.
 		for _, r := range resp.Records {
@@ -83,6 +77,14 @@ func (c *shardConsumer) consume(ctx context.Context, shard string) ([]types.Chil
 				return nil, nil
 			}
 		}
+
+		// Check if we fully read the shard. A closed shard returns its last
+		// records together with a nil iterator, so those are processed above
+		// before leaving.
+		if resp.NextShardIterator == nil {
+			return resp.ChildShards, nil
+		}
+		iter = resp.NextShardIterator
 
 		// Wait for the poll interval to pass or cancel
 		select {
@@ -103,8 +105,7 @@ func (c *shardConsumer) iterator(ctx context.Context) (*string, error) {
 		}
 		resp, err := c.client.GetShardIterator(ctx, c.params)
 		if err != nil {
-			var throughputErr *types.ProvisionedThroughputExceededException
-			if errors.As(err, &throughputErr) {
+			if _, ok := errors.AsType[*types.ProvisionedThroughputExceededException](err); ok {
 				// We called the function too often and should wait a bit
 				// until trying again
 				c.log.Tracef("throughput exceeded when getting iterator for shard %s...", *c.params.ShardId)
@@ -370,11 +371,9 @@ func (c *consumer) startShardConsumer(ctx context.Context, id, seqnr string) {
 		if c.position != nil {
 			cseqnr = c.position(cid)
 		}
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
+		c.wg.Go(func() {
 			c.startShardConsumer(ctx, cid, cseqnr)
-		}()
+		})
 	}
 }
 

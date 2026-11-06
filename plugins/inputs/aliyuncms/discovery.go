@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -63,16 +64,16 @@ func getRPCReqFromDiscoveryRequest(req discoveryRequest) (*requests.RpcRequest, 
 
 	ptrV := reflect.Indirect(reflect.ValueOf(req))
 
-	for i := 0; i < ptrV.NumField(); i++ {
-		if ptrV.Field(i).Type().String() == "*requests.RpcRequest" {
-			if !ptrV.Field(i).CanInterface() {
-				return nil, fmt.Errorf("can't get interface of %q", ptrV.Field(i))
+	for _, field := range ptrV.Fields() {
+		if field.Type().String() == "*requests.RpcRequest" {
+			if !field.CanInterface() {
+				return nil, fmt.Errorf("can't get interface of %q", field)
 			}
 
-			rpcReq, ok := ptrV.Field(i).Interface().(*requests.RpcRequest)
+			rpcReq, ok := reflect.TypeAssert[*requests.RpcRequest](field)
 
 			if !ok {
-				return nil, fmt.Errorf("can't convert interface of %q to '*requests.RpcRequest' type", ptrV.Field(i).Interface())
+				return nil, fmt.Errorf("can't convert interface of %q to '*requests.RpcRequest' type", field.Interface())
 			}
 
 			return rpcReq, nil
@@ -384,9 +385,7 @@ func (dt *discoveryTool) getDiscoveryDataAcrossRegions(lmtr chan bool) (map[stri
 			return nil, err
 		}
 
-		for k, v := range data {
-			resultData[k] = v
-		}
+		maps.Copy(resultData, data)
 	}
 	return resultData, nil
 }
@@ -402,10 +401,7 @@ func (dt *discoveryTool) start() {
 	// Initializing channel
 	dt.done = make(chan bool)
 
-	dt.wg.Add(1)
-	go func() {
-		defer dt.wg.Done()
-
+	dt.wg.Go(func() {
 		ticker := time.NewTicker(dt.interval)
 		defer ticker.Stop()
 
@@ -424,17 +420,14 @@ func (dt *discoveryTool) start() {
 				}
 
 				if !reflect.DeepEqual(data, lastData) {
-					lastData = make(map[string]any, len(data))
-					for k, v := range data {
-						lastData[k] = v
-					}
+					lastData = maps.Clone(data)
 
 					// send discovery data in blocking mode
 					dt.dataChan <- data
 				}
 			}
 		}
-	}()
+	})
 }
 
 // stop the discovery loop, making sure all data is read from 'dataChan'

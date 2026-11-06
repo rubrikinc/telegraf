@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -20,7 +22,6 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	"github.com/influxdata/telegraf/internal/choice"
 	"github.com/influxdata/telegraf/metric"
 	common_http "github.com/influxdata/telegraf/plugins/common/http"
 	"github.com/influxdata/telegraf/plugins/inputs"
@@ -66,11 +67,11 @@ func (c *CtrlXDataLayer) Init() error {
 	for i := range c.Subscription {
 		sub := &c.Subscription[i]
 		sub.applyDefaultSettings()
-		if !choice.Contains(sub.QueueBehaviour, queueBehaviours) {
+		if !slices.Contains(queueBehaviours, sub.QueueBehaviour) {
 			c.Log.Infof("The right queue behaviour values are %v", queueBehaviours)
 			return fmt.Errorf("subscription %d: setting 'queue_behaviour' %q is invalid", i, sub.QueueBehaviour)
 		}
-		if !choice.Contains(sub.ValueChange, valueChanges) {
+		if !slices.Contains(valueChanges, sub.ValueChange) {
 			c.Log.Infof("The right value change values are %v", valueChanges)
 			return fmt.Errorf("subscription %d: setting 'value_change' %q is invalid", i, sub.ValueChange)
 		}
@@ -251,14 +252,10 @@ func (c *CtrlXDataLayer) createMetric(em *sseEventData, sub *subscription) (tele
 	}
 
 	// add tags of subscription if user has defined
-	for key, value := range sub.Tags {
-		tags[key] = value
-	}
+	maps.Copy(tags, sub.Tags)
 
 	// add tags of node if user has defined
-	for key, value := range node.Tags {
-		tags[key] = value
-	}
+	maps.Copy(tags, node.Tags)
 
 	// set measurement of subscription
 	measurement := sub.Measurement
